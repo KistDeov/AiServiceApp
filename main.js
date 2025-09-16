@@ -399,7 +399,7 @@ function startEmailMonitoring() {
       console.log('Checking emails at:', currentTimeString);
 
       // --- SPAM + IGNORED szűrés ---
-      const spamKeywords = ['spam', 'junk', 'promóció', 'reklám', 'ad', 'free money', "guaranteed", "amazing deal", "act now", "limited time", "click here", "buy now"];
+      const spamKeywords = ['no-reply','noreply','no reply','spam', 'junk', 'promóció', 'reklám', 'ad', 'free money', "guaranteed", "amazing deal", "act now", "limited time", "click here", "buy now"];
       let unreadEmails = await getEmailsBasedOnProvider();
       // Filter out spam and ignored emails
       const ignoredEmailsList = (settings.ignoredEmails || []).map(e => e.trim().toLowerCase()).filter(Boolean);

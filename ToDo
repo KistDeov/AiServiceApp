@@ -1,10 +1,9 @@
 Fontos:
-    - Kell frissítési kliens rendszer
-    - El kell végezni a fájlokon, mappákon egy security check-et, meg kell nézni mennyire biztonságos az app Please review for production readiness check for common vulnerabilities, secure headers, forms, input validation, authentication, error handling, debug statements, dependency security, and ensure adherence to industry best practices.
 Ráér:
     - Login felvillan hiába vagyok bejelentkezve
     - Kell egy opció, ahol be lehet állítani, kérsz e értesítést arról, ha ki ment egy automata levél (mire mit válaszolt)
     - Be lehessen állítani, hogy melyik email-címekre válaszoljon 
     - Lehessen több emailel bejelentkezni, úgymint a thunderbirdnél (Fiókok aloldal)
-    - Átt állni céges (openai, github, vercel) fiókokra
+    - Át állni céges (openai, github, vercel) fiókokra
+    - Please review for production readiness check for common vulnerabilities, secure headers, forms, input validation, authentication, error handling, debug statements, dependency security, and ensure adherence to industry best practices.
 
