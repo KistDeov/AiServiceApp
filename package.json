@@ -1,0 +1,129 @@
+{
+  "name": "aimail",
+  "version": "1.0.2",
+  "description": "An aplication that uses AI to answer mails",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start:react": "webpack serve --config webpack.config.js",
+    "start:electron": "wait-on http://localhost:8080 && electron .",
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "build": "webpack --config webpack.config.js",
+    "build-preload": "node build-preload.js",
+    "build-installer": "electron-builder"
+  },
+  "build": {
+    "appId": "aimail",
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "./assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "installerIcon": "./assets/icon.ico",
+      "uninstallerIcon": "./assets/icon.ico",
+      "uninstallDisplayName": "AI Service App Uninstaller",
+      "allowToChangeInstallationDirectory": true
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*",
+      "attachments/**/*",
+      "main.js",
+      "preload.js",
+      "gmail.js",
+      "src/**/*",
+      "package.json",
+      "server.js"
+    ],
+    "extraResources": [
+      ".env",
+      "token.json",
+      "credentials.json",
+      "settings.json",
+      "sentEmailsLog.json",
+      "repliedEmails.json"
+    ]
+  },
+  "keywords": [],
+  "author": "KistDeov",
+  "license": "ISC",
+  "devDependencies": {
+    "@babel/core": "^7.27.1",
+    "@babel/preset-env": "^7.27.2",
+    "@babel/preset-react": "^7.27.1",
+    "@electron-forge/cli": "^7.8.1",
+    "@electron-forge/maker-deb": "^7.8.1",
+    "@electron-forge/maker-rpm": "^7.8.1",
+    "@electron-forge/maker-squirrel": "^7.8.1",
+    "@electron-forge/maker-zip": "^7.8.1",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.8.1",
+    "@electron-forge/plugin-fuses": "^7.8.1",
+    "@electron/fuses": "^1.8.0",
+    "babel-loader": "^10.0.0",
+    "buffer": "^6.0.3",
+    "concurrently": "^9.1.2",
+    "copy-webpack-plugin": "^13.0.0",
+    "crypto-browserify": "^3.12.1",
+    "electron": "^36.3.1",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.4",
+    "html-webpack-plugin": "^5.6.3",
+    "stream-browserify": "^3.0.0",
+    "wait-on": "^8.0.3",
+    "webpack": "^5.99.9",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.1"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@google-cloud/local-auth": "^3.0.1",
+    "@mui/material": "^7.1.0",
+    "axios": "^1.6.8",
+    "chart.js": "^4.5.0",
+    "dotenv": "^16.5.0",
+    "electron-squirrel-startup": "^1.0.1",
+    "emailjs-mime-codec": "^2.0.9",
+    "exceljs": "^4.4.0",
+    "fs": "^0.0.1-security",
+    "global": "^4.4.0",
+    "googleapis": "^149.0.0",
+    "html-to-text": "^9.0.5",
+    "imap": "^0.8.19",
+    "mailparser": "^3.7.3",
+    "markdown-to-jsx": "^7.7.13",
+    "mysql2": "^3.14.5",
+    "node-imap": "^0.9.6",
+    "nodemailer": "^7.0.3",
+    "openai": "^4.103.0",
+    "react": "^19.1.0",
+    "react-chartjs-2": "^5.3.0",
+    "react-dom": "^19.1.0",
+    "react-icons": "^5.5.0",
+    "react-markdown": "^10.1.0",
+    "rfc2047": "^4.0.1",
+    "xlsx": "^0.18.5"
+  },
+  "config": {
+    "forge": {
+      "packagerConfig": {
+        "icon": "./assets/icon.ico"
+      },
+      "makers": [
+        {
+          "name": "@electron-forge/maker-squirrel",
+          "config": {
+            "name": "aiserviceapp",
+            "setupIcon": "./assets/icon.ico"
+          }
+        }
+      ]
+    }
+  }
+}
