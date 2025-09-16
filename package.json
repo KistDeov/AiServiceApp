@@ -31,12 +31,12 @@
       "allowToChangeInstallationDirectory": true
     },
     "publish": [
-    {
-      "provider": "github",
-      "owner": "KistDeov",
-      "repo": "AiServiceApp",
-      "private": true
-    }
+      {
+        "provider": "github",
+        "owner": "KistDeov",
+        "repo": "AiServiceApp",
+        "private": true
+      }
     ],
     "files": [
       "dist/**/*",
@@ -97,6 +97,7 @@
     "chart.js": "^4.5.0",
     "dotenv": "^16.5.0",
     "electron-squirrel-startup": "^1.0.1",
+    "electron-updater": "^6.6.2",
     "emailjs-mime-codec": "^2.0.9",
     "exceljs": "^4.4.0",
     "fs": "^0.0.1-security",
