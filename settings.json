@@ -1,5 +1,5 @@
 {
-  "autoSend": true,
+  "autoSend": false,
   "autoSendStartTime": "08:00",
   "autoSendEndTime": "16:00",
   "displayMode": "windowed",

@@ -93,3 +93,4 @@ jspm_packages/
 .vscode-test
 
 credentials.json
+token.json
