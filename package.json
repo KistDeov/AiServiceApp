@@ -30,6 +30,14 @@
       "uninstallDisplayName": "AI Service App Uninstaller",
       "allowToChangeInstallationDirectory": true
     },
+    "publish": [
+    {
+      "provider": "github",
+      "owner": "KistDeov",
+      "repo": "AiServiceApp",
+      "private": true
+    }
+    ],
     "files": [
       "dist/**/*",
       "assets/**/*",
