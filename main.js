@@ -3,7 +3,7 @@ import { findFile } from './src/utils/findFile.js';
 dotenv.config({ path: findFile('.env') });
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, autoUpdater } from 'electron';
 import { getUnreadEmails, getEmailById } from './gmail.js';
 import { OpenAI } from 'openai';
 import XLSX from 'xlsx';
@@ -15,7 +15,7 @@ import SmtpEmailHandler from './src/backend/smtp-handler.js';
 import ExcelJS from 'exceljs';
 import dns from 'dns';
 import mysql from 'mysql2/promise'; // a fájl tetején legyen!
-import { updateElectronApp, UpdateSourceType } from 'update-electron-app';  
+
 
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
@@ -32,14 +32,14 @@ if (!gotTheLock) {
 }
 
 //Frissitési kliens
-updateElectronApp({
-  updateSource: {
-    type: UpdateSourceType.ElectronPublicUpdateService,
-    repo: 'KistDeov/AiServiceApp'
-  },
-  updateInterval: '5 minutes'
-})
+const server = 'https://update.electronjs.org'
+const feed = `${server}/KistDeov/AiServiceApp/${process.platform}-${process.arch}/${app.getVersion()}`
 
+autoUpdater.setFeedURL(feed)
+
+setInterval(() => {
+  autoUpdater.checkForUpdates()
+}, 2 * 60 * 1000)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
