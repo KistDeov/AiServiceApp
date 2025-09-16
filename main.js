@@ -15,6 +15,7 @@ import SmtpEmailHandler from './src/backend/smtp-handler.js';
 import ExcelJS from 'exceljs';
 import dns from 'dns';
 import mysql from 'mysql2/promise'; // a fájl tetején legyen!
+import { updateElectronApp, UpdateSourceType } from 'update-electron-app';  
 
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
@@ -29,6 +30,16 @@ if (!gotTheLock) {
     }
   });
 }
+
+//Frissitési kliens
+updateElectronApp({
+  updateSource: {
+    type: UpdateSourceType.ElectronPublicUpdateService,
+    repo: 'KistDeov/AiServiceApp'
+  },
+  updateInterval: '1 hour'
+})
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
