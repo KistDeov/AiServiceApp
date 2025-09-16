@@ -33,10 +33,6 @@ if (!gotTheLock) {
     }
   });
 }
-  
-//Frissitési kliens
-autoUpdater.checkForUpdatesAndNotify()
-
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -1573,6 +1569,26 @@ app.whenReady().then(async () => {
   startInternetMonitoring();
   console.log('Initial auth state:', authState); // Debug log
   
+  // Frissítési kliens és események
+  autoUpdater.checkForUpdatesAndNotify();
+
+  autoUpdater.on('update-available', () => {
+    console.log('Frissítés elérhető!');
+    if (mainWindow) mainWindow.webContents.send('update-available');
+  });
+  autoUpdater.on('update-not-available', () => {
+    console.log('Nincs új frissítés.');
+    if (mainWindow) mainWindow.webContents.send('update-not-available');
+  });
+  autoUpdater.on('update-downloaded', () => {
+    console.log('Frissítés letöltve, újraindítás szükséges!');
+    if (mainWindow) mainWindow.webContents.send('update-downloaded');
+  });
+  autoUpdater.on('error', (err) => {
+    console.error('Frissítési hiba:', err);
+    if (mainWindow) mainWindow.webContents.send('update-error', err.message);
+  });
+
   if (authState.isAuthenticated) {
     try {
       if (authState.provider === 'gmail') {
