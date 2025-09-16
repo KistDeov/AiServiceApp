@@ -37,7 +37,7 @@ updateElectronApp({
     type: UpdateSourceType.ElectronPublicUpdateService,
     repo: 'KistDeov/AiServiceApp'
   },
-  updateInterval: '1 hour'
+  updateInterval: '5 minutes'
 })
 
 

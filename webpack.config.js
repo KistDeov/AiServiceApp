@@ -9,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export default {
-  mode: 'development',
+  mode: 'production',
   entry: './src/renderer/index.jsx',
   output: {
     path: path.resolve(__dirname, 'dist'),
