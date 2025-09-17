@@ -171,12 +171,12 @@ ipcMain.handle('get-licence-from-localstorage', async (event, licence) => {
 
 async function setTrialEndedForLicence(licence) {
   try {
-    const connection = await mysql.createConnection({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME
-    });
+    const dbUrl = process.env.DATABASE_URL; // Az adatbázis URL-t az .env fájlból olvassuk
+    if (!dbUrl) {
+      throw new Error('DATABASE_URL környezeti változó nincs beállítva!');
+    }
+
+    const connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
     const [result] = await connection.execute(
       'UPDATE user SET trialEnded = 1 WHERE licence = ?',
       [licence]
@@ -1750,19 +1750,18 @@ async function describeImagesWithAI(images) {
 
 ipcMain.handle('check-licence', async (event, { email, licenceKey }) => {
   try {
-    const connection = await mysql.createConnection({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME
-    });
-    // Ellenőrzés
+    const dbUrl = process.env.DATABASE_URL; // Az adatbázis URL-t az .env fájlból olvassuk
+    if (!dbUrl) {
+      throw new Error('DATABASE_URL környezeti változó nincs beállítva!');
+    }
+
+    const connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
     const [rows] = await connection.execute(
       'SELECT * FROM user WHERE email = ? AND licence = ?',
       [email, licenceKey]
     );
+
     if (rows.length > 0) {
-      // licenceActivated mező beállítása true-ra
       await connection.execute(
         'UPDATE user SET licenceActivated = 1 WHERE email = ? AND licence = ?',
         [email, licenceKey]
