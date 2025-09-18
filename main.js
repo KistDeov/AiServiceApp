@@ -1197,6 +1197,7 @@ async function sendReply({ to, subject, body, emailId }) {
       mimeMsg += `Content-Type: text/html; charset="UTF-8"\r\n`;
       mimeMsg += `Content-Transfer-Encoding: 7bit\r\n\r\n`;
       mimeMsg += `${htmlReply}\r\n`;
+
       // Signature image inline
       if (signatureImage && fs.existsSync(imagePath)) {
         const ext = path.extname(signatureImage).toLowerCase();
@@ -1212,6 +1213,7 @@ async function sendReply({ to, subject, body, emailId }) {
         mimeMsg += `Content-Disposition: inline; filename="${signatureImage}"\r\n\r\n`;
         mimeMsg += imageData.toString('base64').replace(/(.{76})/g, '$1\r\n') + '\r\n';
       }
+
       // Watermark image inline
       if (fs.existsSync(watermarkImagePath)) {
         const ext = path.extname(watermarkImagePath).toLowerCase();
@@ -1226,6 +1228,7 @@ async function sendReply({ to, subject, body, emailId }) {
         mimeMsg += `Content-Disposition: inline; filename="watermark.png"\r\n\r\n`;
         mimeMsg += watermarkData.toString('base64').replace(/(.{76})/g, '$1\r\n') + '\r\n';
       }
+
       // Attachments (as regular attachments)
       for (const filename of attachmentFiles) {
         const filePath = path.join(attachmentsDir, filename);
@@ -1245,6 +1248,7 @@ async function sendReply({ to, subject, body, emailId }) {
         }
       }
       mimeMsg += `--${boundary}--`;
+
       const encodedMessage = Buffer.from(mimeMsg)
         .toString('base64')
         .replace(/\+/g, '-')
@@ -1944,6 +1948,14 @@ function appendSentEmailLog(entry) {
     console.error('Hiba a sentEmailsLog.json írásakor:', err);
   }
 
+}
+
+function encodeRFC2047Name(name) {
+  // Csak akkor kódoljuk, ha van nem-ASCII karakter
+  if (/[^ -~]/.test(name)) {
+    return `=?UTF-8?B?${Buffer.from(name, 'utf-8').toString('base64')}?=`;
+  }
+  return name;
 }
 
 function formatAddress(address) {

@@ -1,5 +1,5 @@
 {
-  "autoSend": true,
+  "autoSend": false,
   "autoSendStartTime": "00:00",
   "autoSendEndTime": "23:59",
   "displayMode": "windowed",
@@ -9,8 +9,8 @@
   "signatureText": "Drónbirodalom",
   "signatureImage": "src\\images\\signature.png",
   "ignoredEmails": [],
-  "minEmailDate": "2025-09-11",
+  "minEmailDate": "",
   "maxEmailDate": "",
-  "notifyOnAutoReply": true,
-  "notificationEmail": "kistuttosi.david@gmail.com"
+  "notifyOnAutoReply": false,
+  "notificationEmail": ""
 }
