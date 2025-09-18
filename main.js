@@ -97,12 +97,10 @@ ipcMain.handle('upload-attachment', async (event, { name, size, content }) => {
       console.error(`[upload-attachment] Túl nagy fájl (${size} bájt):`, name);
       return { success: false, error: 'A fájl mérete nem lehet nagyobb 25 MB-nál.' };
     }
-    // Ensure attachments folder exists
     const attachmentsDir = path.join(app.getPath('userData'), 'attachments');
     if (!fs.existsSync(attachmentsDir)) {
       fs.mkdirSync(attachmentsDir, { recursive: true });
     }
-    // Avoid overwrite: if file exists, add (1), (2), ...
     let base = path.parse(name).name;
     let ext = path.parse(name).ext;
     let filePath = path.join(attachmentsDir, name);
@@ -111,12 +109,7 @@ ipcMain.handle('upload-attachment', async (event, { name, size, content }) => {
       filePath = path.join(attachmentsDir, `${base}(${counter})${ext}`);
       counter++;
     }
-    try {
-      fs.writeFileSync(filePath, Buffer.from(content));
-    } catch (writeErr) {
-      console.error(`[upload-attachment] Nem sikerült írni a fájlt: ${filePath}`, writeErr);
-      return { success: false, error: 'Nem sikerült menteni a fájlt: ' + writeErr.message };
-    }
+    fs.writeFileSync(filePath, Buffer.from(content));
     console.log(`[upload-attachment] Sikeres feltöltés: ${filePath} (${size} bájt)`);
     return { success: true, filePath };
   } catch (error) {
@@ -520,51 +513,28 @@ function startEmailMonitoring() {
               if ((replyResult && replyResult.success) || (replyResult && replyResult.id)) {
                 let markedAsRead = false;
                 let markError = null;
-                if (authState.provider === 'smtp' && smtpHandler) {
-                  for (let attempt = 0; attempt < 2; attempt++) {
-                    try {
-                      await smtpHandler.markAsRead(email.id);
-                      markedAsRead = true;
-                      break;
-                    } catch (err) {
-                      markError = err;
-                      console.error('SMTP markAsRead error (attempt ' + (attempt+1) + '):', err);
-                      if (smtpHandler && smtpHandler.imap && smtpHandler.imap.state !== 'connected') {
-                        try { await smtpHandler.connect(); } catch (e) { console.error('Reconnect failed:', e); }
-                      }
-                      if (attempt === 0) {
-                        try {
-                          await smtpHandler.connect();
-                          await smtpHandler.markAsRead(email.id);
-                          markedAsRead = true;
-                          break;
-                        } catch (err2) {
-                          markError = err2;
-                          console.error('SMTP markAsRead failed after reconnect:', err2);
-                        }
-                      }
-                    }
-                  }
-                } else if (authState.provider === 'gmail') {
-                  try {
+                try {
+                  if (authState.provider === 'smtp' && smtpHandler) {
+                    await smtpHandler.markAsRead(email.id);
+                    markedAsRead = true;
+                  } else if (authState.provider === 'gmail') {
                     const auth = await authorize();
                     const gmail = google.gmail({ version: 'v1', auth });
-                    console.log('[GMAIL] Mark as read, messageId:', email.id);
-                    const modifyRes = await gmail.users.messages.modify({
+                    await gmail.users.messages.modify({
                       userId: 'me',
                       id: email.id,
                       requestBody: {
                         removeLabelIds: ['UNREAD']
                       }
                     });
-                    console.log('[GMAIL] Modify response:', JSON.stringify(modifyRes.data));
                     markedAsRead = true;
-                  } catch (modifyErr) {
-                    console.error('[GMAIL] Modify error:', modifyErr);
                   }
+                } catch (err) {
+                  markError = err;
+                  console.error('Error marking email as read:', err);
                 }
+
                 if (markedAsRead) {
-                  if (!Array.isArray(repliedEmailIds)) repliedEmailIds = [];
                   repliedEmailIds.push(email.id);
                   saveRepliedEmails(repliedEmailIds);
                   console.log('Reply sent and email marked as read for:', email.id);
@@ -572,8 +542,9 @@ function startEmailMonitoring() {
                   console.error('Reply sent, but failed to mark as read:', email.id, markError);
                 }
               } else {
-                console.log('Reply failed for email:', email.id, 'replyResult:', JSON.stringify(replyResult));
+                console.error('Reply failed for email:', email.id, 'replyResult:', replyResult);
               }
+              replyInProgressIds = replyInProgressIds.filter(id => id !== email.id);
             } else {
               console.log('Email already replied to:', email.id);
             }
@@ -687,6 +658,7 @@ function readRepliedEmails() {
 function saveRepliedEmails(ids) {
   try {
     fs.writeFileSync(REPLIED_EMAILS_FILE, JSON.stringify(ids, null, 2), 'utf-8');
+    console.log('Replied emails saved:', ids); // Add logging
   } catch (err) {
     console.error('Hiba a válaszolt levelek mentésekor:', err);
   }
@@ -932,15 +904,32 @@ async function autoReplyEmail(email) {
 
     console.log('AutoReplyEmail kezdése:', email.id);
     const generatedReply = await generateReply(email);
-    const result = await sendReply({
+    let replyResult = await sendReply({
       to: email.from,
       subject: `${email.subject}`,
       body: generatedReply,
       emailId: email.id
     });
 
-    console.log('Válasz küldés eredménye:', result, 'Email ID:', email.id);
-    return result;
+    // Retry mechanism
+    let retryCount = 0;
+    while (retryCount < 3) {
+      try {
+        replyResult = await sendReply({
+          to: email.from,
+          subject: `${email.subject}`,
+          body: generatedReply,
+          emailId: email.id
+        });
+        if (replyResult && replyResult.success) break;
+      } catch (err) {
+        console.error('Retrying sendReply due to error:', err);
+      }
+      retryCount++;
+    }
+
+    console.log('Válasz küldés eredménye:', replyResult, 'Email ID:', email.id);
+    return replyResult;
   } catch (error) {
     console.error('Hiba az automatikus válasz során:', error, 'Email ID:', email.id);
     return { success: false, error: error.message };
@@ -1869,12 +1858,10 @@ ipcMain.handle('upload-attachment', async (event, { name, size, content }) => {
       console.error(`[upload-attachment] Túl nagy fájl (${size} bájt):`, name);
       return { success: false, error: 'A fájl mérete nem lehet nagyobb 25 MB-nál.' };
     }
-    // Ensure attachments folder exists
     const attachmentsDir = path.join(app.getPath('userData'), 'attachments');
     if (!fs.existsSync(attachmentsDir)) {
       fs.mkdirSync(attachmentsDir, { recursive: true });
     }
-    // Avoid overwrite: if file exists, add (1), (2), ...
     let base = path.parse(name).name;
     let ext = path.parse(name).ext;
     let filePath = path.join(attachmentsDir, name);
@@ -1883,12 +1870,7 @@ ipcMain.handle('upload-attachment', async (event, { name, size, content }) => {
       filePath = path.join(attachmentsDir, `${base}(${counter})${ext}`);
       counter++;
     }
-    try {
-      fs.writeFileSync(filePath, Buffer.from(content));
-    } catch (writeErr) {
-      console.error(`[upload-attachment] Nem sikerült írni a fájlt: ${filePath}`, writeErr);
-      return { success: false, error: 'Nem sikerült menteni a fájlt: ' + writeErr.message };
-    }
+    fs.writeFileSync(filePath, Buffer.from(content));
     console.log(`[upload-attachment] Sikeres feltöltés: ${filePath} (${size} bájt)`);
     return { success: true, filePath };
   } catch (error) {
@@ -1930,8 +1912,13 @@ function appendSentEmailLog(entry) {
 
 }
 
+// Define encodeRFC2047Name function
+function encodeRFC2047Name(name) {
+  return `=?UTF-8?B?${Buffer.from(name, 'utf-8').toString('base64')}?=`;
+}
+
+// Correct formatAddress function
 function formatAddress(address) {
-  // Pl. address: 'Árvíztűrő Tükörfúrógép <valaki@example.com>' vagy csak 'valaki@example.com'
   const match = address.match(/^(.*)<(.+@.+)>$/);
   if (match) {
     const name = match[1].trim().replace(/^"|"$/g, '');
