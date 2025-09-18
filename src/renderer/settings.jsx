@@ -121,7 +121,10 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged }) => {
   const [ignoredEmails, setIgnoredEmails] = useState("");
   const [minEmailDate, setMinEmailDate] = useState(""); // ÚJ
   const [maxEmailDate, setMaxEmailDate] = useState(""); // ÚJ
+  const [notifyOnAutoReply, setNotifyOnAutoReply] = useState(false);
+  const [notificationEmail, setNotificationEmail] = useState("");
 
+  // Load settings
   useEffect(() => {
     Promise.all([
       window.api.getAutoSend(),
@@ -130,8 +133,10 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged }) => {
       window.api.getTimedAutoSend ? window.api.getTimedAutoSend() : Promise.resolve(true),
       window.api.getIgnoredEmails ? window.api.getIgnoredEmails() : Promise.resolve([]),
       window.api.getMinEmailDate ? window.api.getMinEmailDate() : Promise.resolve(""),
-      window.api.getMaxEmailDate ? window.api.getMaxEmailDate() : Promise.resolve("")
-    ]).then(([autoSendVal, times, mode, timed, ignored, minDate, maxDate]) => {
+      window.api.getMaxEmailDate ? window.api.getMaxEmailDate() : Promise.resolve(""),
+      window.api.getNotifyOnAutoReply(),
+      window.api.getNotificationEmail()
+    ]).then(([autoSendVal, times, mode, timed, ignored, minDate, maxDate, notify, email]) => {
       setAutoSend(autoSendVal);
       setStartTime(times.startTime);
       setEndTime(times.endTime);
@@ -140,6 +145,8 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged }) => {
       setIgnoredEmails((ignored || []).join(", "));
       setMinEmailDate(minDate || "");
       setMaxEmailDate(maxDate || "");
+      setNotifyOnAutoReply(notify || false);
+      setNotificationEmail(email || "");
       setLoading(false);
       window.global.autoSend = autoSendVal;
     });
@@ -235,6 +242,18 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged }) => {
   const handleMaxEmailDateChange = (e) => {
     setMaxEmailDate(e.target.value);
     window.api.setMaxEmailDate && window.api.setMaxEmailDate(e.target.value);
+  };
+
+  const handleNotifyOnAutoReplyChange = (event) => {
+    const newValue = event.target.checked;
+    setNotifyOnAutoReply(newValue);
+    window.api.setNotifyOnAutoReply(newValue);
+  };
+
+  const handleNotificationEmailChange = (event) => {
+    const newValue = event.target.value;
+    setNotificationEmail(newValue);
+    window.api.setNotificationEmail(newValue);
   };
 
   if (loading) {
@@ -353,6 +372,30 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged }) => {
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                 Csak az itt megadott dátumok között érkezett leveleket dolgozza fel a rendszer.
               </Typography>
+            </Box>
+            <Box sx={{ mt: 4 }}>
+              <Typography variant="h6" gutterBottom>
+                Automatikus válasz értesítések
+              </Typography>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={notifyOnAutoReply}
+                    onChange={handleNotifyOnAutoReplyChange}
+                  />
+                }
+                label="Értesítés küldése automatikus válasz esetén"
+              />
+              {notifyOnAutoReply && (
+                <TextField
+                  label="Értesítési email cím"
+                  value={notificationEmail}
+                  onChange={handleNotificationEmailChange}
+                  placeholder="pl. admin@example.com"
+                  fullWidth
+                  sx={{ mt: 2 }}
+                />
+              )}
             </Box>
           </FormGroup>
         </Box>

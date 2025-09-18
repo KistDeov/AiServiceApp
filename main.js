@@ -766,6 +766,27 @@ ipcMain.handle('show-image-dialog', async () => {
   return { success: false, error: 'No file selected' };
 });
 
+//Értesítések
+ipcMain.handle("getNotifyOnAutoReply", async () => {
+  return settings.notifyOnAutoReply || false;
+});
+
+ipcMain.handle("setNotifyOnAutoReply", async (event, value) => {
+  settings.notifyOnAutoReply = value;
+  saveSettings(settings);
+  return true;
+});
+
+ipcMain.handle("getNotificationEmail", async () => {
+  return settings.notificationEmail || "";
+});
+
+ipcMain.handle("setNotificationEmail", async (event, email) => {
+  settings.notificationEmail = email;
+  saveSettings(settings);
+  return true;
+});
+
 ipcMain.handle('delete-signature-image', async () => {
   try {
     let errors = [];
@@ -1253,6 +1274,16 @@ async function sendReply({ to, subject, body, emailId }) {
       originalSubject,
       originalBody: originalBodyPlain,
     });
+
+    // Értesítés küldése, ha engedélyezve van
+    if (settings.notifyOnAutoReply && settings.notificationEmail) {
+      await smtpHandler.sendEmail({
+        to: settings.notificationEmail,
+        subject: `Automatikus válasz értesítés: ${subject}`,
+        body: `Automatikus válasz ment a következő címre: ${to}\n\nVálasz tartalma:\n${body}`,
+      });
+    }
+
     return sendResult;
   } catch (error) {
     console.error('Hiba az email küldése során:', error);
@@ -1856,16 +1887,6 @@ ipcMain.handle('upload-signature-image', async (event, fileContent) => {
 ipcMain.handle('upload-attachment', async (event, { name, size, content }) => {
   console.log('[upload-attachment] Fájl feltöltés megkezdése:', { name, size });
   try {
-    if (!name || !content) {
-      console.error('[upload-attachment] Hiányzó fájlnév vagy tartalom:', { name, contentType: typeof content });
-      return { success: false, error: 'Hiányzó fájlnév vagy tartalom.' };
-    }
-    if (size > 25 * 1024 * 1024) {
-      console.error(`[upload-attachment] Túl nagy fájl (${size} bájt):`, name);
-      return { success: false, error: 'A fájl mérete nem lehet nagyobb 25 MB-nál.' };
-    }
-    // Ensure attachments folder exists
-    const attachmentsDir = path.join(app.getPath('userData'), 'attachments');
     if (!fs.existsSync(attachmentsDir)) {
       fs.mkdirSync(attachmentsDir, { recursive: true });
     }

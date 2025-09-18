@@ -35,6 +35,11 @@ contextBridge.exposeInMainWorld('api', {
   exitApp: () => ipcRenderer.invoke('exit-app'),
   setAutoSendTimes: (times) => ipcRenderer.invoke('setAutoSendTimes', times),
   getAutoSendTimes: () => ipcRenderer.invoke('getAutoSendTimes'),
+  //Éretsítések
+  getNotifyOnAutoReply: () => ipcRenderer.invoke('getNotifyOnAutoReply'),
+  setNotifyOnAutoReply: (value) => ipcRenderer.invoke('setNotifyOnAutoReply', value),
+  getNotificationEmail: () => ipcRenderer.invoke('getNotificationEmail'),
+  setNotificationEmail: (email) => ipcRenderer.invoke('setNotificationEmail', email),
   // Megjelenítési mód kezelése
   getDisplayMode: () => ipcRenderer.invoke('getDisplayMode'),
   setDisplayMode: (mode) => ipcRenderer.invoke('setDisplayMode', mode),
