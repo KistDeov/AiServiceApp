@@ -163,6 +163,7 @@ Sikeres használatot kíván az Ai Mail csapata!`
             borderRadius: 2,
             boxShadow: 3,
             minHeight: 300,
+            maxHeight: 500,
             display: 'flex',
             alignItems: 'center',
           }}

@@ -200,7 +200,7 @@ const MailsView = ({ showSnackbar }) => {
   return (
     <Paper sx={{ 
       p: 4,
-      maxHeight: '90vh',
+      maxHeight: '550px',
       overflow: 'hidden',
       display: 'flex',
       flexDirection: 'column'

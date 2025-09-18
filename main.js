@@ -1529,7 +1529,8 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js')
-    }
+    },
+    icon: path.join(__dirname, 'assets', 'icon.ico')
   });
   //mainWindow.webContents.openDevTools();
 
@@ -1926,4 +1927,16 @@ function appendSentEmailLog(entry) {
   } catch (err) {
     console.error('Hiba a sentEmailsLog.json írásakor:', err);
   }
+
+}
+
+function formatAddress(address) {
+  // Pl. address: 'Árvíztűrő Tükörfúrógép <valaki@example.com>' vagy csak 'valaki@example.com'
+  const match = address.match(/^(.*)<(.+@.+)>$/);
+  if (match) {
+    const name = match[1].trim().replace(/^"|"$/g, '');
+    const email = match[2].trim();
+    return `"${encodeRFC2047Name(name)}" <${email}>`;
+  }
+  return address;
 }
