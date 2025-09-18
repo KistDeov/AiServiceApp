@@ -636,13 +636,22 @@ const App = () => {
   };
 
   const handleConfirmAutoSend = () => {
-    setAutoSend(true);
-    window.api.setAutoSend(true).then(() => {
-      window.api.onAutoSendChanged?.(true);
-    });
-    window.api.setTimedAutoSend && window.api.setTimedAutoSend(timedAutoSend);
-    setShowAutoSendDialog(false);
-    setPendingAutoSend(false);
+      setAutoSend(true);
+      window.api.setAutoSend(true).then(() => {
+          window.api.onAutoSendChanged?.(true);
+      });
+
+      if (!timedAutoSend) {
+          // Ha az időzített automatikus válaszküldés nincs bekapcsolva, állítsuk az időintervallumot 00:00-tól 23:59-ig
+          setStartTime("00:00");
+          setEndTime("23:59");
+          window.api.setAutoSendTimes?.({ startTime: "00:00", endTime: "23:59" });
+      } else {
+          window.api.setTimedAutoSend && window.api.setTimedAutoSend(timedAutoSend);
+      }
+
+      setShowAutoSendDialog(false);
+      setPendingAutoSend(false);
   };
 
   const handleCancelAutoSend = () => {

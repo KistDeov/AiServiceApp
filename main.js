@@ -97,10 +97,12 @@ ipcMain.handle('upload-attachment', async (event, { name, size, content }) => {
       console.error(`[upload-attachment] Túl nagy fájl (${size} bájt):`, name);
       return { success: false, error: 'A fájl mérete nem lehet nagyobb 25 MB-nál.' };
     }
+    // Ensure attachments folder exists
     const attachmentsDir = path.join(app.getPath('userData'), 'attachments');
     if (!fs.existsSync(attachmentsDir)) {
       fs.mkdirSync(attachmentsDir, { recursive: true });
     }
+    // Avoid overwrite: if file exists, add (1), (2), ...
     let base = path.parse(name).name;
     let ext = path.parse(name).ext;
     let filePath = path.join(attachmentsDir, name);
@@ -109,7 +111,12 @@ ipcMain.handle('upload-attachment', async (event, { name, size, content }) => {
       filePath = path.join(attachmentsDir, `${base}(${counter})${ext}`);
       counter++;
     }
-    fs.writeFileSync(filePath, Buffer.from(content));
+    try {
+      fs.writeFileSync(filePath, Buffer.from(content));
+    } catch (writeErr) {
+      console.error(`[upload-attachment] Nem sikerült írni a fájlt: ${filePath}`, writeErr);
+      return { success: false, error: 'Nem sikerült menteni a fájlt: ' + writeErr.message };
+    }
     console.log(`[upload-attachment] Sikeres feltöltés: ${filePath} (${size} bájt)`);
     return { success: true, filePath };
   } catch (error) {
@@ -658,7 +665,6 @@ function readRepliedEmails() {
 function saveRepliedEmails(ids) {
   try {
     fs.writeFileSync(REPLIED_EMAILS_FILE, JSON.stringify(ids, null, 2), 'utf-8');
-    console.log('Replied emails saved:', ids); // Add logging
   } catch (err) {
     console.error('Hiba a válaszolt levelek mentésekor:', err);
   }
@@ -1858,10 +1864,12 @@ ipcMain.handle('upload-attachment', async (event, { name, size, content }) => {
       console.error(`[upload-attachment] Túl nagy fájl (${size} bájt):`, name);
       return { success: false, error: 'A fájl mérete nem lehet nagyobb 25 MB-nál.' };
     }
+    // Ensure attachments folder exists
     const attachmentsDir = path.join(app.getPath('userData'), 'attachments');
     if (!fs.existsSync(attachmentsDir)) {
       fs.mkdirSync(attachmentsDir, { recursive: true });
     }
+    // Avoid overwrite: if file exists, add (1), (2), ...
     let base = path.parse(name).name;
     let ext = path.parse(name).ext;
     let filePath = path.join(attachmentsDir, name);
@@ -1870,7 +1878,12 @@ ipcMain.handle('upload-attachment', async (event, { name, size, content }) => {
       filePath = path.join(attachmentsDir, `${base}(${counter})${ext}`);
       counter++;
     }
-    fs.writeFileSync(filePath, Buffer.from(content));
+    try {
+      fs.writeFileSync(filePath, Buffer.from(content));
+    } catch (writeErr) {
+      console.error(`[upload-attachment] Nem sikerült írni a fájlt: ${filePath}`, writeErr);
+      return { success: false, error: 'Nem sikerült menteni a fájlt: ' + writeErr.message };
+    }
     console.log(`[upload-attachment] Sikeres feltöltés: ${filePath} (${size} bájt)`);
     return { success: true, filePath };
   } catch (error) {
@@ -1912,13 +1925,8 @@ function appendSentEmailLog(entry) {
 
 }
 
-// Define encodeRFC2047Name function
-function encodeRFC2047Name(name) {
-  return `=?UTF-8?B?${Buffer.from(name, 'utf-8').toString('base64')}?=`;
-}
-
-// Correct formatAddress function
 function formatAddress(address) {
+  // Pl. address: 'Árvíztűrő Tükörfúrógép <valaki@example.com>' vagy csak 'valaki@example.com'
   const match = address.match(/^(.*)<(.+@.+)>$/);
   if (match) {
     const name = match[1].trim().replace(/^"|"$/g, '');

@@ -1,7 +1,7 @@
 {
-  "autoSend": true,
-  "autoSendStartTime": "08:00",
-  "autoSendEndTime": "16:00",
+  "autoSend": false,
+  "autoSendStartTime": "00:00",
+  "autoSendEndTime": "23:59",
   "displayMode": "windowed",
   "LeftNavBarOn": true,
   "greeting": "Tisztelt Ügyfelünk!",

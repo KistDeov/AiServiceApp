@@ -177,7 +177,19 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged }) => {
       if (onAutoSendChanged) onAutoSendChanged(true); // <-- EZ ITT A LÉNYEG
       window.api.onAutoSendChanged && window.api.onAutoSendChanged(true);
     });
+
+    if (!timedAutoSend) {
+
+    setStartTime("00:00");
+    setEndTime("23:59");
+    window.api.setAutoSendTimes({
+      startTime: "00:00",
+      endTime: "23:59"
+    });
+  } else {
     window.api.setTimedAutoSend && window.api.setTimedAutoSend(timedAutoSend);
+  }
+  
     setShowConfirmDialog(false);
     setPendingAutoSend(false);
   };
