@@ -1600,8 +1600,6 @@ app.whenReady().then(async () => {
   startInternetMonitoring();
   console.log('Initial auth state:', authState); // Debug log
   
-  
-
   // Frissítési kliens és események
   autoUpdater.checkForUpdatesAndNotify();
 
