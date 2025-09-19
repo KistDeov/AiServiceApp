@@ -52,7 +52,6 @@ import { GoDotFill } from "react-icons/go";
 import { FaTimesCircle } from "react-icons/fa";
 import IconButton from '@mui/material/IconButton';
 import ReplyStatsChart from './components/ReplyStatsChart';
-import { ipcRenderer } from 'electron';
 
 // Téma objektumok
 const themes = {
@@ -751,6 +750,18 @@ const App = () => {
   }, [isOnline]);
 
   useEffect(() => {
+    const ipc = window.electron?.ipcRenderer;
+    const addListener = (channel, fn) => {
+      if (!ipc) return;
+      if (typeof ipc.on === 'function') ipc.on(channel, fn);
+      else if (typeof ipc.addListener === 'function') ipc.addListener(channel, fn);
+    };
+    const removeListener = (channel, fn) => {
+      if (!ipc) return;
+      if (typeof ipc.removeListener === 'function') ipc.removeListener(channel, fn);
+      else if (typeof ipc.off === 'function') ipc.off(channel, fn);
+    };
+
     const handleUpdateAvailable = () => {
       setIsUpdating(true); // Frissítés elérhető, megjelenítjük az UpdateView-t
     };
@@ -759,12 +770,12 @@ const App = () => {
       setIsUpdating(false); // Frissítés letöltve, újraindítás szükséges
     };
 
-    ipcRenderer.on('update-available', handleUpdateAvailable);
-    ipcRenderer.on('update-downloaded', handleUpdateDownloaded);
+    addListener('update-available', handleUpdateAvailable);
+    addListener('update-downloaded', handleUpdateDownloaded);
 
     return () => {
-      ipcRenderer.removeListener('update-available', handleUpdateAvailable);
-      ipcRenderer.removeListener('update-downloaded', handleUpdateDownloaded);
+      removeListener('update-available', handleUpdateAvailable);
+      removeListener('update-downloaded', handleUpdateDownloaded);
     };
   }, []);
 
@@ -1032,7 +1043,7 @@ const App = () => {
               onMouseLeave={handleDrawerMouseLeave}
             >
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', p: 1 }}>
-                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.11</Typography>
+                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.12</Typography>
                 <IconButton onClick={handlePinClick} size="small" color={isPinned ? 'error' : 'default'}>
                   {isPinned ? (
                     <FaTimesCircle size={20} color="#d32f2f" />
