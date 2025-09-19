@@ -35,7 +35,7 @@
         "provider": "github",
         "owner": "KistDeov",
         "repo": "AiServiceApp",
-        "private": true
+        "private": false
       }
     ],
     "files": [
