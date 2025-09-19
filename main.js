@@ -14,7 +14,7 @@ import fs from 'fs';
 import SmtpEmailHandler from './src/backend/smtp-handler.js';
 import ExcelJS from 'exceljs';
 import dns from 'dns';
-import mysql from 'mysql2/promise'; // a fájl tetején legyen!
+import mysql from 'mysql2/promise'; 
 import updaterPkg from "electron-updater";
 const { autoUpdater } = updaterPkg;
 
@@ -1600,25 +1600,61 @@ app.whenReady().then(async () => {
   startInternetMonitoring();
   console.log('Initial auth state:', authState); // Debug log
   
+  
+
   // Frissítési kliens és események
   autoUpdater.checkForUpdatesAndNotify();
 
   autoUpdater.on('update-available', () => {
     console.log('Frissítés elérhető!');
-    if (mainWindow) mainWindow.webContents.send('update-available');
+    if (mainWindow) {
+      mainWindow.webContents.send('update-available');
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Frissítés elérhető',
+        message: 'Új frissítés érhető el az alkalmazáshoz. A letöltés folyamatban van.',
+        buttons: ['OK']
+      });
+    }
   });
+
   autoUpdater.on('update-not-available', () => {
     console.log('Nincs új frissítés.');
-    if (mainWindow) mainWindow.webContents.send('update-not-available');
+    if (mainWindow) {
+      mainWindow.webContents.send('update-not-available');
+    }
   });
+
   autoUpdater.on('update-downloaded', () => {
     console.log('Frissítés letöltve, újraindítás szükséges!');
-    if (mainWindow) mainWindow.webContents.send('update-downloaded');
+    if (mainWindow) {
+      mainWindow.webContents.send('update-downloaded');
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Frissítés letöltve',
+        message: 'Az új frissítés letöltése befejeződött. Az alkalmazás újraindításával telepítheted a frissítést.',
+        buttons: ['Újraindítás', 'Később']
+      }).then(result => {
+        if (result.response === 0) { // 'Újraindítás' gomb
+          autoUpdater.quitAndInstall();
+        }
+      });
+    }
   });
+
   autoUpdater.on('error', (err) => {
     console.error('Frissítési hiba:', err);
-    if (mainWindow) mainWindow.webContents.send('update-error', err.message);
+    if (mainWindow) {
+      mainWindow.webContents.send('update-error', err.message);
+      dialog.showMessageBox(mainWindow, {
+        type: 'error',
+        title: 'Frissítési hiba',
+        message: `Hiba történt a frissítés során: ${err.message}`,
+        buttons: ['OK']
+      });
+    }
   });
+
 
   if (authState.isAuthenticated) {
     try {

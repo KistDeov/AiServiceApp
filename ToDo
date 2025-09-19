@@ -1,6 +1,8 @@
 Fontos:
     - Kép és attachment nem megy gmailes küldésen
+    - Nem müködik az autoUpdate
 Ráér:
+    - main.js optimalizásása
     - Új frontend dizájn
     - Login felvillan hiába vagyok bejelentkezve
     - Be lehessen állítani, hogy melyik email-címekre válaszoljon 
