@@ -1599,7 +1599,7 @@ app.whenReady().then(async () => {
   createWindow();
   startInternetMonitoring();
   console.log('Initial auth state:', authState); // Debug log
-  
+
   // Frissítési kliens és események
   autoUpdater.checkForUpdatesAndNotify();
 

@@ -17,6 +17,8 @@
   },
   "build": {
     "appId": "aimail",
+    "productName": "aimail",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "win": {
       "target": [
         "nsis"
