@@ -43,6 +43,7 @@ import TutorialView from './components/TutorialView';
 import DemoOverView from './components/DemoOverView';
 import HelpView from './components/HelpView';
 import NoConnectionView from './components/NoConnectionView.jsx';
+import UpdateView from "./components/UpdateView.jsx";
 import LicenceActivationView from './components/LicenceActivationView.jsx';
 import { FaRegQuestionCircle, FaBars, FaThumbtack, FaHome, FaEnvelope, FaDatabase, FaRobot, FaCog, FaSignOutAlt, FaPowerOff, FaUserFriends } from 'react-icons/fa';
 import { FaEnvelopeCircleCheck } from "react-icons/fa6";
@@ -51,6 +52,7 @@ import { GoDotFill } from "react-icons/go";
 import { FaTimesCircle } from "react-icons/fa";
 import IconButton from '@mui/material/IconButton';
 import ReplyStatsChart from './components/ReplyStatsChart';
+import { ipcRenderer } from 'electron';
 
 // Téma objektumok
 const themes = {
@@ -475,6 +477,7 @@ const App = () => {
   const [timedAutoSend, setTimedAutoSend] = useState(true);
   const [startTime, setStartTime] = useState("08:00");
   const [endTime, setEndTime] = useState("16:00");
+  const [isUpdating, setIsUpdating] = useState(false);
 
   // Navbar állapot inicializálása settingsből
   useEffect(() => {
@@ -746,6 +749,33 @@ const App = () => {
       if (retryInterval) clearInterval(retryInterval);
     };
   }, [isOnline]);
+
+  useEffect(() => {
+    const handleUpdateAvailable = () => {
+      setIsUpdating(true); // Frissítés elérhető, megjelenítjük az UpdateView-t
+    };
+
+    const handleUpdateDownloaded = () => {
+      setIsUpdating(false); // Frissítés letöltve, újraindítás szükséges
+    };
+
+    ipcRenderer.on('update-available', handleUpdateAvailable);
+    ipcRenderer.on('update-downloaded', handleUpdateDownloaded);
+
+    return () => {
+      ipcRenderer.removeListener('update-available', handleUpdateAvailable);
+      ipcRenderer.removeListener('update-downloaded', handleUpdateDownloaded);
+    };
+  }, []);
+
+  if (isUpdating) {
+    return (
+      <ThemeProvider theme={themes[themeName] || themes.black}>
+        <CssBaseline />
+        <UpdateView />
+      </ThemeProvider>
+    );
+  }
 
   // Demo állapot folyamatos ellenőrzése
   useEffect(() => {

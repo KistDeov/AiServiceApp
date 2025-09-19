@@ -81,7 +81,34 @@ function waitForCodeFromLocalhost() {
       const url = new URL(req.url, 'http://localhost');
       const code = url.searchParams.get('code');
       if (code) {
-        res.end('Sikeres hitelesítés! Visszatérhetsz az alkalmazásba.');
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(`
+          <!DOCTYPE html>
+          <html lang="hu">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Sikeres hitelesítés</title>
+            <style>
+              body {
+                font-family: Arial, sans-serif;
+                text-align: center;
+                margin-top: 50px;
+              }
+              h1 {
+                color: #4CAF50;
+              }
+              p {
+                color: #555;
+              }
+            </style>
+          </head>
+          <body>
+            <h1>Sikeres hitelesítés!</h1>
+            <p>Visszatérhetsz az alkalmazásba.</p>
+          </body>
+          </html>
+        `);
         server.close();
         resolve(code);
       } else {

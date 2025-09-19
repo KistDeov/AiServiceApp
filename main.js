@@ -1051,19 +1051,12 @@ function prepareOriginalForQuote(originalEmail) {
 
 async function sendReply({ to, subject, body, emailId }) {
   try {
+    console.log(`[sendReply] Küldés megkezdése: to=${to}, subject=${subject}, emailId=${emailId}`);
     let sendResult;
-    const signatureText = settings.signatureText || '';
+    const signatureText = settings.signatureText || 'AiMail';
     const signatureImage = settings.signatureImage || '';
-    let htmlBody = null;
     let imageCid = 'signature';
     let watermarkCid = 'watermark';
-    let imageMime = '';
-    let imagePath = '';
-    let originalFrom = '';
-    let originalDate = '';
-    let originalSubject = '';
-    let originalBody = '';
-    let originalBodyPlain = '';
 
     // --- Attachments: list all files in attachments folder ---
     const attachmentsDir = path.join(app.getPath('userData'), 'attachments');
@@ -1071,226 +1064,147 @@ async function sendReply({ to, subject, body, emailId }) {
     if (fs.existsSync(attachmentsDir)) {
       attachmentFiles = fs.readdirSync(attachmentsDir).filter(f => fs.statSync(path.join(attachmentsDir, f)).isFile());
     }
-
-    // Build nodemailer-style attachments array
-    const nodemailerAttachments = attachmentFiles.map(filename => ({
-      filename,
-      path: path.join(attachmentsDir, filename)
-    }));
-
-    // Add signature image if exists
-    if (signatureImage) {
-      imagePath = signatureImage;
-      if (fs.existsSync(imagePath)) {
-        nodemailerAttachments.push({
-          filename: path.basename(signatureImage),
-          path: imagePath,
-          cid: imageCid
-        });
-      }
-    }
-    // Add watermark image if exists
-    if (fs.existsSync(watermarkImagePath)) {
-      nodemailerAttachments.push({
-        filename: 'watermark.png',
-        path: watermarkImagePath,
-        cid: watermarkCid
-      });
-    }
+    console.log(`[sendReply] Csatolmányok: ${attachmentFiles.join(', ')}`);
 
     // --- Eredeti üzenet adatok betöltése ---
+    let originalFrom = '';
+    let originalDate = '';
+    let originalSubject = '';
+    let originalBodyPlain = '';
     if (emailId) {
       try {
-        let headers, payload;
-        if (authState.provider === 'smtp' && smtpHandler) {
-          const originalEmail = await smtpHandler.getEmailById(emailId);
-          originalFrom = originalEmail.from || '';
-          originalDate = originalEmail.date || '';
-          originalSubject = originalEmail.subject || '';
-          originalBodyPlain = prepareOriginalForQuote(originalEmail);
-        } else {
-          // Gmail esetén
-          const auth = await authorize();
-          const gmail = google.gmail({ version: 'v1', auth });
-          const originalEmail = await gmail.users.messages.get({
-            userId: 'me',
-            id: emailId,
-            format: 'full',
-          });
-          headers = originalEmail.data.payload.headers;
-          payload = originalEmail.data.payload;
-          originalFrom = headers.find(h => h.name === 'From')?.value || '';
-          originalDate = headers.find(h => h.name === 'Date')?.value || '';
-          originalSubject = headers.find(h => h.name === 'Subject')?.value || '';
-          originalBodyPlain = extractBody(payload);
-          if (/=C[0-9A-F]/i.test(originalBodyPlain) || /=\r?\n/.test(originalBodyPlain)) {
-            originalBodyPlain = decodeQuotedPrintableFallback(originalBodyPlain);
-          }
-          originalBodyPlain = stripMimeArtifacts(originalBodyPlain);
-        }
+        const auth = await authorize();
+        const gmail = google.gmail({ version: 'v1', auth });
+        const originalEmail = await gmail.users.messages.get({
+          userId: 'me',
+          id: emailId,
+          format: 'full',
+        });
+        const headers = originalEmail.data.payload.headers;
+        const payload = originalEmail.data.payload;
+        originalFrom = headers.find(h => h.name === 'From')?.value || '';
+        originalDate = headers.find(h => h.name === 'Date')?.value || '';
+        originalSubject = headers.find(h => h.name === 'Subject')?.value || '';
+        originalBodyPlain = extractBody(payload);
       } catch (err) {
-        console.error('Nem sikerült az eredeti email betöltése:', err);
+        console.error(`[sendReply] Nem sikerült az eredeti email betöltése: ${err.message}`);
+      }
+    }
+    
+    // --- Gmail ---
+    let boundary = '----=_Part_' + Math.random().toString(36).slice(2);
+    let mimeMsg = '';
+    let encodedSubject = `=?UTF-8?B?${Buffer.from(subject || 'Válasz', 'utf-8').toString('base64')}?=`;
+    mimeMsg += `To: ${formatAddress(to)}\r\n`;
+    mimeMsg += `Subject: ${encodedSubject}\r\n`;
+    mimeMsg += `MIME-Version: 1.0\r\n`;
+    mimeMsg += `Content-Type: multipart/related; boundary="${boundary}"\r\n`;
+
+    // --- TEXT/PLAIN part ---
+    mimeMsg += `\r\n--${boundary}\r\n`;
+    mimeMsg += `Content-Type: text/plain; charset="UTF-8"\r\n`;
+    mimeMsg += `Content-Transfer-Encoding: 7bit\r\n\r\n`;
+    mimeMsg += `${body}\r\n`;
+
+    // --- HTML part ---
+    mimeMsg += `\r\n--${boundary}\r\n`;
+    mimeMsg += `Content-Type: text/html; charset="UTF-8"\r\n`;
+    mimeMsg += `Content-Transfer-Encoding: 7bit\r\n\r\n`;
+    mimeMsg += `<html><body>`;
+    mimeMsg += `<p>${body}</p>`;
+
+    // --- Eredeti szöveg idézése ---
+    if (originalBodyPlain) {
+      mimeMsg += `<blockquote style="margin: 10px 0; padding: 10px; border-left: 2px solid #ccc;">`;
+      mimeMsg += `<p><strong>Eredeti üzenet:</strong></p>`;
+      mimeMsg += `<p><strong>Feladó:</strong> ${escapeHtml(originalFrom)}</p>`;
+      mimeMsg += `<p><strong>Dátum:</strong> ${escapeHtml(originalDate)}</p>`;
+      mimeMsg += `<p><strong>Tárgy:</strong> ${escapeHtml(originalSubject)}</p>`;
+      mimeMsg += `<p>${escapeHtml(originalBodyPlain)}</p>`;
+      mimeMsg += `</blockquote>`;
+    }
+
+    // --- Signature image ---
+        // Gmail esetén attachmentként csatoljuk, és inline is megjelenítjük
+        // --- Signature image ---
+    if (signatureImage && fs.existsSync(signatureImage)) {
+      const signatureData = fs.readFileSync(signatureImage);
+      if (authState.provider === 'gmail') {
+        mimeMsg += `<p><img src="cid:${imageCid}" alt="Signature"></p>`;
+        mimeMsg += `\r\n--${boundary}\r\n`;
+        mimeMsg += `Content-Type: image/png\r\n`;
+        mimeMsg += `Content-Transfer-Encoding: base64\r\n`;
+        mimeMsg += `Content-Disposition: attachment; filename="signature.png"\r\n`;
+        mimeMsg += `Content-ID: <${imageCid}>\r\n\r\n`; // Content-ID hozzáadása
+        mimeMsg += signatureData.toString('base64').replace(/(.{76})/g, '$1\r\n') + '\r\n';
+      } else if (authState.provider === 'smtp') {
+        mimeMsg += `<p><img src="cid:${imageCid}" alt="Signature"></p>`;
       }
     }
 
-    // --- Idézett eredeti üzenet blokk (plain és html) ---
-    // Tisztítsd meg az idézett eredeti szöveget minden MIME/maradék kódolástól!
-    let cleanOriginal = originalBodyPlain;
-    if (cleanOriginal) {
-      cleanOriginal = decodeQuotedPrintableFallback(cleanOriginal);
-      cleanOriginal = stripMimeArtifacts(cleanOriginal);
-    }
-    // Itt még egyszer dekódoljuk, ha kell!
-    cleanOriginal = decodeQuotedPrintableFallback(cleanOriginal);
-    cleanOriginal = stripMimeArtifacts(cleanOriginal);
-
-    const quotedOriginal = cleanOriginal
-      ? `\n\n----- Eredeti üzenet -----\nFeladó: ${originalFrom}\nDátum: ${originalDate}\nTárgy: ${originalSubject}\n\n${buildQuotedOriginalPlain(cleanOriginal)}`
-      : '';
-
-    const finalText = body + quotedOriginal;
-
-    const htmlReply = (() => {
-      let mainPart = escapeHtml(body).replace(/\n/g, '<br>');
-      if (signatureText) mainPart += `<br><br>${escapeHtml(signatureText)}`;
-      if (signatureImage) mainPart += `<br><img src="cid:${imageCid}" style="width:15%">`;
-      if (fs.existsSync(watermarkImagePath)) {
-        mainPart += `<br><b>Charter Okos Mail</b><br><a href="${watermarkLink}" target="_blank"><img src="cid:${watermarkCid}" style="width:15%"></a>`;
-      }
-      if (!cleanOriginal) return `<p>${mainPart}</p>`;
-      const originalHtmlBlock = escapeHtml(cleanOriginal).replace(/\n/g, '<br>');
-      return `<div style="font-family:Arial,Helvetica,sans-serif;white-space:normal;">
-<p>${mainPart}</p>
-<hr style="margin:16px 0;border:none;border-top:1px solid #ccc;">
-<div style="color:#555;font-size:12px;margin-bottom:4px;">Eredeti üzenet</div>
-<blockquote style="margin:0;padding-left:8px;border-left:3px solid #ccc;white-space:normal;">${originalHtmlBlock}</blockquote>
-</div>`;
-    })();
-
-    // --- SMTP ---
-    if (authState.provider === 'smtp' && smtpHandler) {
-      sendResult = await smtpHandler.sendEmail({
-        to,
-        subject,
-        body: finalText,
-        html: htmlReply,
-        attachments: nodemailerAttachments,
-      });
-    } else {
-      // --- GMAIL ---
-      let boundary = '----=_Part_' + Math.random().toString(36).slice(2);
-      let mimeMsg = '';
-      let encodedSubject = `=?UTF-8?B?${Buffer.from(subject || 'Válasz', 'utf-8').toString('base64')}?=`;
-      mimeMsg += `To: ${formatAddress(to)}\r\n`;
-      mimeMsg += `Subject: ${encodedSubject}\r\n`;
-      mimeMsg += `MIME-Version: 1.0\r\n`;
-      mimeMsg += `Content-Type: multipart/related; boundary="${boundary}"\r\n`;
-
-      // --- TEXT/PLAIN part (EZ HIÁNYZOTT!) ---
-      mimeMsg += `\r\n--${boundary}\r\n`;
-      mimeMsg += `Content-Type: text/plain; charset="UTF-8"\r\n`;
-      mimeMsg += `Content-Transfer-Encoding: 7bit\r\n\r\n`;
-      mimeMsg += `${finalText}\r\n`;
-
-      // --- HTML part ---
-      mimeMsg += `\r\n--${boundary}\r\n`;
-      mimeMsg += `Content-Type: text/html; charset="UTF-8"\r\n`;
-      mimeMsg += `Content-Transfer-Encoding: 7bit\r\n\r\n`;
-      mimeMsg += `${htmlReply}\r\n`;
-
-      // Signature image inline
-      if (signatureImage && fs.existsSync(imagePath)) {
-        const ext = path.extname(signatureImage).toLowerCase();
-        if (ext === '.png') imageMime = 'image/png';
-        else if (ext === '.jpg' || ext === '.jpeg') imageMime = 'image/jpeg';
-        else if (ext === '.gif') imageMime = 'image/gif';
-        else imageMime = 'application/octet-stream';
-        const imageData = fs.readFileSync(imagePath);
+    // --- Watermark image ---
+    if (fs.existsSync(watermarkImagePath)) {
+      const watermarkData = fs.readFileSync(watermarkImagePath);
+      if (authState.provider === 'gmail') {
+        mimeMsg += `<p><img src="cid:${watermarkCid}" alt="Watermark"></p>`;
         mimeMsg += `\r\n--${boundary}\r\n`;
-        mimeMsg += `Content-Type: ${imageMime}\r\n`;
+        mimeMsg += `Content-Type: image/png\r\n`;
         mimeMsg += `Content-Transfer-Encoding: base64\r\n`;
-        mimeMsg += `Content-ID: <${imageCid}>\r\n`;
-        mimeMsg += `Content-Disposition: inline; filename="${signatureImage}"\r\n\r\n`;
-        mimeMsg += imageData.toString('base64').replace(/(.{76})/g, '$1\r\n') + '\r\n';
-      }
-
-      // Watermark image inline
-      if (fs.existsSync(watermarkImagePath)) {
-        const ext = path.extname(watermarkImagePath).toLowerCase();
-        let watermarkMime = 'image/png';
-        if (ext === '.jpg' || ext === '.jpeg') watermarkMime = 'image/jpeg';
-        else if (ext === '.gif') watermarkMime = 'image/gif';
-        const watermarkData = fs.readFileSync(watermarkImagePath);
-        mimeMsg += `\r\n--${boundary}\r\n`;
-        mimeMsg += `Content-Type: ${watermarkMime}\r\n`;
-        mimeMsg += `Content-Transfer-Encoding: base64\r\n`;
-        mimeMsg += `Content-ID: <${watermarkCid}>\r\n`;
-        mimeMsg += `Content-Disposition: inline; filename="watermark.png"\r\n\r\n`;
+        mimeMsg += `Content-Disposition: attachment; filename="watermark.png"\r\n`;
+        mimeMsg += `Content-ID: <${watermarkCid}>\r\n\r\n`; // Content-ID hozzáadása
         mimeMsg += watermarkData.toString('base64').replace(/(.{76})/g, '$1\r\n') + '\r\n';
+      } else if (authState.provider === 'smtp') {
+        mimeMsg += `<p><img src="cid:${watermarkCid}" alt="Watermark"></p>`;
       }
-
-      // Attachments (as regular attachments)
-      for (const filename of attachmentFiles) {
-        const filePath = path.join(attachmentsDir, filename);
-        if (fs.existsSync(filePath)) {
-          const fileData = fs.readFileSync(filePath);
-          const ext = path.extname(filename).toLowerCase();
-          let mimeType = 'application/octet-stream';
-          if (ext === '.png') mimeType = 'image/png';
-          else if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
-          else if (ext === '.pdf') mimeType = 'application/pdf';
-          else if (ext === '.txt') mimeType = 'text/plain';
-          mimeMsg += `\r\n--${boundary}\r\n`;
-          mimeMsg += `Content-Type: ${mimeType}\r\n`;
-          mimeMsg += `Content-Transfer-Encoding: base64\r\n`;
-          mimeMsg += `Content-Disposition: attachment; filename="${filename}"\r\n\r\n`;
-          mimeMsg += fileData.toString('base64').replace(/(.{76})/g, '$1\r\n') + '\r\n';
-        }
-      }
-      mimeMsg += `--${boundary}--`;
-
-      const encodedMessage = Buffer.from(mimeMsg)
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-      const auth = await authorize();
-      const gmail = google.gmail({ version: 'v1', auth });
-      await gmail.users.messages.send({
-        userId: 'me',
-        requestBody: {
-          raw: encodedMessage,
-        },
-      });
-      sendResult = { success: true };
     }
-    // --- LOG SENT EMAIL ---
-    appendSentEmailLog({
-      id: emailId || null,
-      to,
-      subject,
-      date: new Date().toISOString(),
-      body: finalText,
-      signatureText: signatureText,
-      signatureImage: signatureImage,
-      originalFrom,
-      originalDate,
-      originalSubject,
-      originalBody: originalBodyPlain,
+
+    mimeMsg += `</body></html>\r\n`;
+
+    // --- Signature image attachment ---
+    if (authState.provider === 'gmail' && signatureImage && fs.existsSync(signatureImage)) {
+      const signatureData = fs.readFileSync(signatureImage);
+      mimeMsg += `\r\n--${boundary}\r\n`;
+      mimeMsg += `Content-Type: image/png\r\n`;
+      mimeMsg += `Content-Transfer-Encoding: base64\r\n`;
+      mimeMsg += `Content-Disposition: attachment; filename="signature.png"\r\n\r\n`;
+      mimeMsg += signatureData.toString('base64').replace(/(.{76})/g, '$1\r\n') + '\r\n';
+    } else if (authState.provider === 'smtp' && signatureImage && fs.existsSync(signatureImage)) {
+      mimeMsg += `<p><img src="cid:${imageCid}" alt="Signature"></p>`;
+    }
+
+    // --- Watermark image attachment (Gmail-specific) ---
+    if (authState.provider === 'gmail' && fs.existsSync(watermarkImagePath)) {
+      const watermarkData = fs.readFileSync(watermarkImagePath);
+      mimeMsg += `\r\n--${boundary}\r\n`;
+      mimeMsg += `Content-Type: image/png\r\n`;
+      mimeMsg += `Content-Transfer-Encoding: base64\r\n`;
+      mimeMsg += `Content-Disposition: attachment; filename="watermark.png"\r\n\r\n`;
+      mimeMsg += watermarkData.toString('base64').replace(/(.{76})/g, '$1\r\n') + '\r\n';
+    } else if (authState.provider === 'smtp' && fs.existsSync(watermarkImagePath)) {
+      mimeMsg += `<p><img src="cid:${watermarkCid}" alt="Watermark"></p>`;
+    }
+
+
+    mimeMsg += `--${boundary}--`;
+
+    const encodedMessage = Buffer.from(mimeMsg)
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    const auth = await authorize();
+    const gmail = google.gmail({ version: 'v1', auth });
+    await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw: encodedMessage,
+      },
     });
-
-    // Értesítés küldése, ha engedélyezve van
-    if (settings.notifyOnAutoReply && settings.notificationEmail) {
-      await smtpHandler.sendEmail({
-        to: settings.notificationEmail,
-        subject: `Automatikus válasz értesítés: ${subject}`,
-        body: `Automatikus válasz ment a következő címre: ${to}\n\nVálasz tartalma:\n${body}`,
-      });
-    }
-
+    sendResult = { success: true };
+    console.log(`[sendReply] Gmail küldés sikeres.`);
     return sendResult;
   } catch (error) {
-    console.error('Hiba az email küldése során:', error);
+    console.error(`[sendReply] Hiba az email küldése során: ${error.message}`);
     throw error;
   }
 }
@@ -1917,36 +1831,6 @@ ipcMain.handle('upload-signature-image', async (event, fileContent) => {
     return { success: true, path: targetPath };
   } catch (error) {
     console.error('Hiba a signature kép feltöltésekor:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-// Példa: csatolmány feltöltésekor a mappa létrehozása, ha nem létezik
-ipcMain.handle('upload-attachment', async (event, { name, size, content }) => {
-  console.log('[upload-attachment] Fájl feltöltés megkezdése:', { name, size });
-  try {
-    if (!fs.existsSync(attachmentsDir)) {
-      fs.mkdirSync(attachmentsDir, { recursive: true });
-    }
-    // Avoid overwrite: if file exists, add (1), (2), ...
-    let base = path.parse(name).name;
-    let ext = path.parse(name).ext;
-    let filePath = path.join(attachmentsDir, name);
-    let counter = 1;
-    while (fs.existsSync(filePath)) {
-      filePath = path.join(attachmentsDir, `${base}(${counter})${ext}`);
-      counter++;
-    }
-    try {
-      fs.writeFileSync(filePath, Buffer.from(content));
-    } catch (writeErr) {
-      console.error(`[upload-attachment] Nem sikerült írni a fájlt: ${filePath}`, writeErr);
-      return { success: false, error: 'Nem sikerült menteni a fájlt: ' + writeErr.message };
-    }
-    console.log(`[upload-attachment] Sikeres feltöltés: ${filePath} (${size} bájt)`);
-    return { success: true, filePath };
-  } catch (error) {
-    console.error('[upload-attachment] Általános hiba:', error, { name, size });
     return { success: false, error: error.message };
   }
 });

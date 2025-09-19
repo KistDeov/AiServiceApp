@@ -1,6 +1,7 @@
 Fontos:
-    - Kép és attachment nem megy gmailes küldésen
+
 Ráér:
+    - Kép és attachment nem megy gmailes küldésen
     - main.js optimalizásása
     - Új frontend dizájn
     - Login felvillan hiába vagyok bejelentkezve
