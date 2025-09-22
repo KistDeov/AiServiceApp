@@ -2,6 +2,7 @@ Fontos:
     - Frissítés view nem megy
     - Új frontend dizájn
 Ráér:
+    - .env nem biztonságos
     - Login felvillan hiába vagyok bejelentkezve
     - Be lehessen állítani, hogy melyik email-címekre válaszoljon 
     - Lehessen több emailel bejelentkezni, úgymint a thunderbirdnél (Fiókok aloldal)

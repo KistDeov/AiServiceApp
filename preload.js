@@ -70,7 +70,9 @@ contextBridge.exposeInMainWorld('api', {
   checkInternet: () => ipcRenderer.invoke('check-internet'),
   getMinEmailDate: () => ipcRenderer.invoke('getMinEmailDate'),
   setMinEmailDate: (dateStr) => ipcRenderer.invoke('setMinEmailDate', dateStr),
-  isDemoOver: () => ipcRenderer.invoke('is-demo-over')
+  isDemoOver: () => ipcRenderer.invoke('is-demo-over'),
+  receive: (channel, callback) => ipcRenderer.on(channel, (_, data) => callback(data)),
+  remove: (channel, callback) => ipcRenderer.removeListener(channel, callback),
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {

@@ -477,6 +477,7 @@ const App = () => {
   const [startTime, setStartTime] = useState("08:00");
   const [endTime, setEndTime] = useState("16:00");
   const [isUpdating, setIsUpdating] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState(null);
 
   // Navbar állapot inicializálása settingsből
   useEffect(() => {
@@ -779,6 +780,22 @@ const App = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const handleUpdateAvailable = () => setUpdateStatus('available');
+    const handleUpdateDownloaded = () => setUpdateStatus('downloaded');
+    const handleUpdateNotAvailable = () => setUpdateStatus(null);
+
+    window.api.receive('update-available', handleUpdateAvailable);
+    window.api.receive('update-downloaded', handleUpdateDownloaded);
+    window.api.receive('update-not-available', handleUpdateNotAvailable);
+
+    return () => {
+      window.api.remove('update-available', handleUpdateAvailable);
+      window.api.remove('update-downloaded', handleUpdateDownloaded);
+      window.api.remove('update-not-available', handleUpdateNotAvailable);
+    };
+  }, []);
+
   if (isUpdating) {
     return (
       <ThemeProvider theme={themes[themeName] || themes.black}>
@@ -1043,7 +1060,7 @@ const App = () => {
               onMouseLeave={handleDrawerMouseLeave}
             >
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', p: 1 }}>
-                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.13</Typography>
+                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.14</Typography>
                 <IconButton onClick={handlePinClick} size="small" color={isPinned ? 'error' : 'default'}>
                   {isPinned ? (
                     <FaTimesCircle size={20} color="#d32f2f" />

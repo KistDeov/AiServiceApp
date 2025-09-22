@@ -1,5 +1,5 @@
 {
-  "autoSend": true,
+  "autoSend": false,
   "autoSendStartTime": "00:00",
   "autoSendEndTime": "23:59",
   "displayMode": "windowed",
@@ -7,7 +7,7 @@
   "greeting": "Tisztelt Ügyfelünk!",
   "signature": "Üdvözlettel Charter cégcsoport AI asszisztense!",
   "signatureText": "Drónbirodalom",
-  "signatureImage": "src/images/signature.png",
+  "signatureImage": "",
   "ignoredEmails": [],
   "minEmailDate": "",
   "maxEmailDate": "",
