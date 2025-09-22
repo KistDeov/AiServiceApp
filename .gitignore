@@ -94,3 +94,8 @@ jspm_packages/
 
 credentials.json
 token.json
+db-test.js
+settings.json
+repliedEmails.json
+sentEmails.json
+ToDo.txt

@@ -1,9 +1,7 @@
 Fontos:
-
-Ráér:
-    - Kép és attachment nem megy gmailes küldésen
-    - main.js optimalizásása
+    - Frissítés view nem megy
     - Új frontend dizájn
+Ráér:
     - Login felvillan hiába vagyok bejelentkezve
     - Be lehessen állítani, hogy melyik email-címekre válaszoljon 
     - Lehessen több emailel bejelentkezni, úgymint a thunderbirdnél (Fiókok aloldal)

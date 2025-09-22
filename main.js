@@ -18,8 +18,6 @@ import mysql from 'mysql2/promise';
 import updaterPkg from "electron-updater";
 const { autoUpdater } = updaterPkg;
 
-
-
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -37,8 +35,7 @@ if (!gotTheLock) {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const REPLIED_EMAILS_FILE = findFile('RepliedEmails.json');
-const watermarkLink = 'https://okosmail.hu';
-const watermarkImagePath = path.join(__dirname, 'src', 'images', 'watermark.png');
+
 
 // Környezeti változók és útvonalak kezelése
 const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json');
@@ -69,6 +66,24 @@ function readConfig() {
     console.error('Hiba a konfiguráció beolvasásakor:', err);
   }
   return {};
+}
+
+function encodeRFC2047Name(name) {
+  // Csak akkor kódoljuk, ha van nem-ASCII karakter
+  if (/[^ -~]/.test(name)) {
+    return `=?UTF-8?B?${Buffer.from(name, 'utf-8').toString('base64')}?=`;
+  }
+  return name;
+}
+
+function formatAddress(address) {
+  const match = address.match(/^(.*)<(.+@.+)>$/);
+  if (match) {
+    const name = match[1].trim().replace(/^"|"$/g, '');
+    const email = match[2].trim();
+    return `"${encodeRFC2047Name(name)}" <${email}>`;
+  }
+  return address;
 }
 
 function saveConfig(config) {
@@ -311,15 +326,22 @@ let repliedEmailIds = readRepliedEmails();
 let replyInProgressIds = [];
 
 async function getEmailsBasedOnProvider() {
-  // ...existing code...
   let emails = [];
+
   if (authState.provider === 'smtp') {
+    console.log('Fetching emails using SMTP provider...');
     emails = await smtpHandler.getUnreadEmails();
   } else if (authState.provider === 'gmail') {
+    console.log('Fetching emails using Gmail provider...');
     emails = await getUnreadEmails();
   } else {
-    throw new Error('No valid email provider configured');
+    console.error('Invalid email provider configured:', authState.provider);
+    return []; // Return an empty array if no valid provider is configured
   }
+
+  // Log the number of emails fetched
+  console.log(`Fetched ${emails.length} emails from ${authState.provider} provider.`);
+
   // --- DÁTUM SZŰRÉS JAVÍTÁS ---
   if (settings.minEmailDate || settings.maxEmailDate) {
     const minDate = settings.minEmailDate ? new Date(settings.minEmailDate) : null;
@@ -345,6 +367,7 @@ async function getEmailsBasedOnProvider() {
       return true;
     });
   }
+
   return emails;
 }
 
@@ -581,19 +604,6 @@ function stopEmailMonitoring() {
     clearInterval(emailMonitoringInterval);
     emailMonitoringInterval = null;
   }
-}
-
-function isWithinAutoSendHours() {
-  const now = new Date();
-  const currentTime = now.getHours() * 60 + now.getMinutes();
-  
-  const [startHour, startMinute] = settings.autoSendStartTime.split(':').map(Number);
-  const [endHour, endMinute] = settings.autoSendEndTime.split(':').map(Number);
-  
-  const startTime = startHour * 60 + startMinute;
-  const endTime = endHour * 60 + endMinute;
-  
-  return currentTime >= startTime && currentTime < endTime;
 }
 
 // IPC handler: Get and set ignored emails (globális scope-ban, ne csak startEmailMonitoring-on belül)
@@ -922,141 +932,31 @@ async function generateReply(email) {
   }
 }
 
-async function autoReplyEmail(email) {
-  try {
-    if (!isWithinAutoSendHours()) {
-      console.log('Automatikus válasz kihagyva: időablakon kívül');
-      return { success: false, error: 'Időablakon kívül' };
-    }
-
-    console.log('AutoReplyEmail kezdése:', email.id);
-    const generatedReply = await generateReply(email);
-    let replyResult = await sendReply({
-      to: email.from,
-      subject: `${email.subject}`,
-      body: generatedReply,
-      emailId: email.id
-    });
-
-    // Retry mechanism
-    let retryCount = 0;
-    while (retryCount < 3) {
-      try {
-        replyResult = await sendReply({
-          to: email.from,
-          subject: `${email.subject}`,
-          body: generatedReply,
-          emailId: email.id
-        });
-        if (replyResult && replyResult.success) break;
-      } catch (err) {
-        console.error('Retrying sendReply due to error:', err);
-      }
-      retryCount++;
-    }
-
-    console.log('Válasz küldés eredménye:', replyResult, 'Email ID:', email.id);
-    return replyResult;
-  } catch (error) {
-    console.error('Hiba az automatikus válasz során:', error, 'Email ID:', email.id);
-    return { success: false, error: error.message };
-  }
-}
-
-// Helper to extract body from Gmail API payload
-// filepath: [main.js](http://_vscodecontentref_/3)
-function extractBody(payload) {
-  // Rekurzív keresés text/plain-re, ha nincs, akkor text/html-re
-  function findPart(part, preferredType) {
-    if (!part) return null;
-    if (part.mimeType === preferredType && part.body && part.body.data) {
-      let text = Buffer.from(part.body.data, 'base64').toString('utf8');
-      if (preferredType === 'text/html') {
-        text = text.replace(/<[^>]+>/g, '');
-      }
-      return text;
-    }
-    if (part.parts && Array.isArray(part.parts)) {
-      for (const p of part.parts) {
-        const found = findPart(p, preferredType);
-        if (found) return found;
-      }
-    }
-    return null;
-  }
-  // Először próbáljuk a text/plain-t
-  let result = findPart(payload, 'text/plain');
-  if (result) return result;
-  // Ha nincs, próbáljuk a text/html-t
-  result = findPart(payload, 'text/html');
-  if (result) return result;
-  // Ha semmi nincs, térjünk vissza üres stringgel!
-  return '';
-}
-// --- MIME / QP segédfüggvények (új) ---
-function decodeQuotedPrintableFallback(str) {
-  if (!str || !/=([A-Fa-f0-9]{2})/.test(str)) return str;
-  // Lágy sortörések eltávolítása
-  str = str.replace(/=\r?\n/g, '');
-  // Byte gyűjtés
-  const bytes = [];
-  for (let i = 0; i < str.length; i++) {
-    if (str[i] === '=' && /^[A-Fa-f0-9]{2}$/.test(str.slice(i+1, i+3))) {
-      bytes.push(parseInt(str.slice(i+1, i+3), 16));
-      i += 2;
-    } else {
-      bytes.push(str.charCodeAt(i));
-    }
-  }
-  return Buffer.from(bytes).toString('utf8');
-}
-
-function stripMimeArtifacts(text) {
-  if (!text) return text;
-  return text
-    .split(/\r?\n/)
-    .filter(l => !/^--[_A-Za-z0-9-]+$/.test(l.trim()) &&
-                 !/^Content-(Type|Transfer-Encoding|Disposition):/i.test(l.trim()) &&
-                 !/^MIME-Version:/i.test(l.trim()))
-    .join('\n')
-    .trim();
-}
-
-function escapeHtml(s) {
-  return s.replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[c]));
-}
-
-function buildQuotedOriginalPlain(originalPlain) {
-  return originalPlain
-    .split(/\r?\n/)
-    .map(l => l.trim() ? '> ' + l : '>')
-    .join('\n');
-}
-
-function prepareOriginalForQuote(originalEmail) {
-  let txt = originalEmail?.text || originalEmail?.body || '';
-  if (!txt && originalEmail?.raw) {
-    // Utolsó mentsvár – ne használjuk ha nem muszáj
-    txt = originalEmail.raw;
-  }
-  // Ha még mindig QP minták vannak, dekódoljuk
-  if (/=C[0-9A-F]/i.test(txt) || /=\r?\n/.test(txt)) {
-    txt = decodeQuotedPrintableFallback(txt);
-  }
-  txt = stripMimeArtifacts(txt);
-  return txt;
-}
-
 async function sendReply({ to, subject, body, emailId }) {
   try {
     console.log(`[sendReply] Küldés megkezdése: to=${to}, subject=${subject}, emailId=${emailId}`);
+
     let sendResult;
     const signatureText = settings.signatureText || 'AiMail';
     const signatureImage = settings.signatureImage || '';
+    const watermarkImagePath = path.join(__dirname, 'src', 'images', 'watermark.png');
+    const watermarkLink = 'https://okosmail.hu';
     let imageCid = 'signature';
     let watermarkCid = 'watermark';
+    let htmlBody = body.replace(/\n/g, '<br>');
+
+    // Add signature text
+    if (signatureText) htmlBody += `<br><br>${signatureText}`;
+
+    // Add signature image
+    if (signatureImage && fs.existsSync(signatureImage)) {
+      htmlBody += `<br><img src=\"cid:${imageCid}\" style=\"width:25%\">`;
+    }
+
+    // Add watermark image
+    if (fs.existsSync(watermarkImagePath)) {
+      htmlBody += `<br><img src=\"cid:${watermarkCid}\" style=\"width:25%\">`;
+    }
 
     // --- Attachments: list all files in attachments folder ---
     const attachmentsDir = path.join(app.getPath('userData'), 'attachments');
@@ -1064,33 +964,27 @@ async function sendReply({ to, subject, body, emailId }) {
     if (fs.existsSync(attachmentsDir)) {
       attachmentFiles = fs.readdirSync(attachmentsDir).filter(f => fs.statSync(path.join(attachmentsDir, f)).isFile());
     }
-    console.log(`[sendReply] Csatolmányok: ${attachmentFiles.join(', ')}`);
+    const nodemailerAttachments = attachmentFiles.map(filename => ({
+      filename,
+      path: path.join(attachmentsDir, filename)
+    }));
 
-    // --- Eredeti üzenet adatok betöltése ---
-    let originalFrom = '';
-    let originalDate = '';
-    let originalSubject = '';
-    let originalBodyPlain = '';
-    if (emailId) {
-      try {
-        const auth = await authorize();
-        const gmail = google.gmail({ version: 'v1', auth });
-        const originalEmail = await gmail.users.messages.get({
-          userId: 'me',
-          id: emailId,
-          format: 'full',
-        });
-        const headers = originalEmail.data.payload.headers;
-        const payload = originalEmail.data.payload;
-        originalFrom = headers.find(h => h.name === 'From')?.value || '';
-        originalDate = headers.find(h => h.name === 'Date')?.value || '';
-        originalSubject = headers.find(h => h.name === 'Subject')?.value || '';
-        originalBodyPlain = extractBody(payload);
-      } catch (err) {
-        console.error(`[sendReply] Nem sikerült az eredeti email betöltése: ${err.message}`);
-      }
+    // Add inline images to attachments
+    if (signatureImage && fs.existsSync(signatureImage)) {
+      nodemailerAttachments.push({
+        filename: path.basename(signatureImage),
+        path: signatureImage,
+        cid: imageCid
+      });
     }
-    
+    if (fs.existsSync(watermarkImagePath)) {
+      nodemailerAttachments.push({
+        filename: path.basename(watermarkImagePath),
+        path: watermarkImagePath,
+        cid: watermarkCid
+      });
+    }
+
     // --- Gmail ---
     let boundary = '----=_Part_' + Math.random().toString(36).slice(2);
     let mimeMsg = '';
@@ -1098,92 +992,25 @@ async function sendReply({ to, subject, body, emailId }) {
     mimeMsg += `To: ${formatAddress(to)}\r\n`;
     mimeMsg += `Subject: ${encodedSubject}\r\n`;
     mimeMsg += `MIME-Version: 1.0\r\n`;
-    mimeMsg += `Content-Type: multipart/related; boundary="${boundary}"\r\n`;
-
-    // --- TEXT/PLAIN part ---
-    mimeMsg += `\r\n--${boundary}\r\n`;
-    mimeMsg += `Content-Type: text/plain; charset="UTF-8"\r\n`;
-    mimeMsg += `Content-Transfer-Encoding: 7bit\r\n\r\n`;
-    mimeMsg += `${body}\r\n`;
+    mimeMsg += `Content-Type: multipart/related; boundary=\"${boundary}\"\r\n`;
 
     // --- HTML part ---
     mimeMsg += `\r\n--${boundary}\r\n`;
-    mimeMsg += `Content-Type: text/html; charset="UTF-8"\r\n`;
+    mimeMsg += `Content-Type: text/html; charset=\"UTF-8\"\r\n`;
     mimeMsg += `Content-Transfer-Encoding: 7bit\r\n\r\n`;
-    mimeMsg += `<html><body>`;
-    mimeMsg += `<p>${body}</p>`;
+    mimeMsg += `<html><body>${htmlBody}</body></html>\r\n`;
 
-    // --- Eredeti szöveg idézése ---
-    if (originalBodyPlain) {
-      mimeMsg += `<blockquote style="margin: 10px 0; padding: 10px; border-left: 2px solid #ccc;">`;
-      mimeMsg += `<p><strong>Eredeti üzenet:</strong></p>`;
-      mimeMsg += `<p><strong>Feladó:</strong> ${escapeHtml(originalFrom)}</p>`;
-      mimeMsg += `<p><strong>Dátum:</strong> ${escapeHtml(originalDate)}</p>`;
-      mimeMsg += `<p><strong>Tárgy:</strong> ${escapeHtml(originalSubject)}</p>`;
-      mimeMsg += `<p>${escapeHtml(originalBodyPlain)}</p>`;
-      mimeMsg += `</blockquote>`;
-    }
-
-    // --- Signature image ---
-        // Gmail esetén attachmentként csatoljuk, és inline is megjelenítjük
-        // --- Signature image ---
-    if (signatureImage && fs.existsSync(signatureImage)) {
-      const signatureData = fs.readFileSync(signatureImage);
-      if (authState.provider === 'gmail') {
-        mimeMsg += `<p><img src="cid:${imageCid}" alt="Signature"></p>`;
-        mimeMsg += `\r\n--${boundary}\r\n`;
-        mimeMsg += `Content-Type: image/png\r\n`;
-        mimeMsg += `Content-Transfer-Encoding: base64\r\n`;
-        mimeMsg += `Content-Disposition: attachment; filename="signature.png"\r\n`;
-        mimeMsg += `Content-ID: <${imageCid}>\r\n\r\n`; // Content-ID hozzáadása
-        mimeMsg += signatureData.toString('base64').replace(/(.{76})/g, '$1\r\n') + '\r\n';
-      } else if (authState.provider === 'smtp') {
-        mimeMsg += `<p><img src="cid:${imageCid}" alt="Signature"></p>`;
-      }
-    }
-
-    // --- Watermark image ---
-    if (fs.existsSync(watermarkImagePath)) {
-      const watermarkData = fs.readFileSync(watermarkImagePath);
-      if (authState.provider === 'gmail') {
-        mimeMsg += `<p><img src="cid:${watermarkCid}" alt="Watermark"></p>`;
-        mimeMsg += `\r\n--${boundary}\r\n`;
-        mimeMsg += `Content-Type: image/png\r\n`;
-        mimeMsg += `Content-Transfer-Encoding: base64\r\n`;
-        mimeMsg += `Content-Disposition: attachment; filename="watermark.png"\r\n`;
-        mimeMsg += `Content-ID: <${watermarkCid}>\r\n\r\n`; // Content-ID hozzáadása
-        mimeMsg += watermarkData.toString('base64').replace(/(.{76})/g, '$1\r\n') + '\r\n';
-      } else if (authState.provider === 'smtp') {
-        mimeMsg += `<p><img src="cid:${watermarkCid}" alt="Watermark"></p>`;
-      }
-    }
-
-    mimeMsg += `</body></html>\r\n`;
-
-    // --- Signature image attachment ---
-    if (authState.provider === 'gmail' && signatureImage && fs.existsSync(signatureImage)) {
-      const signatureData = fs.readFileSync(signatureImage);
+    // Attachments (as regular attachments)
+    for (const attachment of nodemailerAttachments) {
+      const fileData = fs.readFileSync(attachment.path);
+      const mimeType = attachment.cid ? 'image/png' : 'application/octet-stream';
       mimeMsg += `\r\n--${boundary}\r\n`;
-      mimeMsg += `Content-Type: image/png\r\n`;
+      mimeMsg += `Content-Type: ${mimeType}\r\n`;
       mimeMsg += `Content-Transfer-Encoding: base64\r\n`;
-      mimeMsg += `Content-Disposition: attachment; filename="signature.png"\r\n\r\n`;
-      mimeMsg += signatureData.toString('base64').replace(/(.{76})/g, '$1\r\n') + '\r\n';
-    } else if (authState.provider === 'smtp' && signatureImage && fs.existsSync(signatureImage)) {
-      mimeMsg += `<p><img src="cid:${imageCid}" alt="Signature"></p>`;
+      mimeMsg += `Content-Disposition: ${attachment.cid ? 'inline' : 'attachment'}; filename=\"${attachment.filename}\"\r\n`;
+      if (attachment.cid) mimeMsg += `Content-ID: <${attachment.cid}>\r\n`;
+      mimeMsg += `\r\n${fileData.toString('base64').replace(/(.{76})/g, '$1\r\n')}\r\n`;
     }
-
-    // --- Watermark image attachment (Gmail-specific) ---
-    if (authState.provider === 'gmail' && fs.existsSync(watermarkImagePath)) {
-      const watermarkData = fs.readFileSync(watermarkImagePath);
-      mimeMsg += `\r\n--${boundary}\r\n`;
-      mimeMsg += `Content-Type: image/png\r\n`;
-      mimeMsg += `Content-Transfer-Encoding: base64\r\n`;
-      mimeMsg += `Content-Disposition: attachment; filename="watermark.png"\r\n\r\n`;
-      mimeMsg += watermarkData.toString('base64').replace(/(.{76})/g, '$1\r\n') + '\r\n';
-    } else if (authState.provider === 'smtp' && fs.existsSync(watermarkImagePath)) {
-      mimeMsg += `<p><img src="cid:${watermarkCid}" alt="Watermark"></p>`;
-    }
-
 
     mimeMsg += `--${boundary}--`;
 
@@ -1192,16 +1019,48 @@ async function sendReply({ to, subject, body, emailId }) {
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=+$/, '');
-    const auth = await authorize();
-    const gmail = google.gmail({ version: 'v1', auth });
-    await gmail.users.messages.send({
-      userId: 'me',
-      requestBody: {
-        raw: encodedMessage,
-      },
+    
+    if (authState.provider === 'smtp') {
+
+      await smtpHandler.connect();
+
+      const mailOptions = {
+        to,
+        subject,
+        body: htmlBody,
+        html: htmlBody,
+        attachments: nodemailerAttachments,
+      };
+
+      const result = await smtpHandler.sendEmail(mailOptions);
+      if (result.success) {
+        sendResult = { success: true };
+        console.log(`[sendReply] SMTP küldés sikeres.`);
+      } else {
+        throw new Error(result.error || 'SMTP küldési hiba.');
+      }
+    } else if (authState.provider === 'gmail') {
+      const auth = await authorize();
+      const gmail = google.gmail({ version: 'v1', auth });
+      await gmail.users.messages.send({
+        userId: 'me',
+        requestBody: {
+          raw: encodedMessage,
+        },
+      });
+      sendResult = { success: true };
+      console.log(`[sendReply] Gmail küldés sikeres.`);
+    }
+    // --- LOG SENT EMAIL ---
+    appendSentEmailLog({
+      id: emailId || null,
+      to,
+      subject,
+      date: new Date().toISOString(),
+      body: body,
+      signatureText: signatureText,
+      signatureImage: signatureImage,
     });
-    sendResult = { success: true };
-    console.log(`[sendReply] Gmail küldés sikeres.`);
     return sendResult;
   } catch (error) {
     console.error(`[sendReply] Hiba az email küldése során: ${error.message}`);
@@ -1215,7 +1074,14 @@ ipcMain.on('open-external', (event, url) => {
 
 ipcMain.handle('get-unread-emails', async () => {
   try {
-    return await getEmailsBasedOnProvider();
+    // Ensure email fetching only starts for the correct provider
+    if (authState.provider === 'gmail') {
+      console.log('Using Gmail provider, starting Gmail email fetching...');
+      return await getEmailsBasedOnProvider();
+    } else if (authState.provider === 'smtp') {
+      console.log('Using SMTP provider, skipping Gmail email fetching.');
+      return []; // Skip Gmail fetching
+    }
   } catch (error) {
     console.error('Hiba az emailek lekérésekor:', error);
     throw error;
@@ -1494,20 +1360,6 @@ function createWindow() {
   });
 }
 
-async function checkAndAutoReply() {
-  if (!autoSend) return;
-  try {
-    const emails = await getEmailsBasedOnProvider();
-    for (const email of emails) {
-      if (!repliedEmailIds.includes(email.id)) {
-        await autoReplyEmail(email);
-      }
-    }
-  } catch (error) {
-    console.error('Hiba az automatikus válaszok küldésekor:', error);
-  }
-}
-
 app.whenReady().then(async () => {
   loadAuthState();
   createWindow();
@@ -1647,18 +1499,10 @@ ipcMain.handle("setDisplayMode", async (event, mode) => {
   return true;
 });
 
-// Helper function to extract email address from 'from' field
 function extractEmailAddress(fromField) {
-  // Egyszerű email cím keresés
   const match = fromField && fromField.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
   return match ? match[1] : null;
 }
-
-// Utility function to convert Markdown links to HTML anchors
-//function convertMarkdownLinksToHtml(text) {
-//  if (!text) return text;
-//  return text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-//}
 
 ipcMain.handle('get-replied-email-ids', async () => {
   const idsToFetch = repliedEmailIds.slice(-20);
@@ -1866,23 +1710,4 @@ function appendSentEmailLog(entry) {
     console.error('Hiba a sentEmailsLog.json írásakor:', err);
   }
 
-}
-
-function encodeRFC2047Name(name) {
-  // Csak akkor kódoljuk, ha van nem-ASCII karakter
-  if (/[^ -~]/.test(name)) {
-    return `=?UTF-8?B?${Buffer.from(name, 'utf-8').toString('base64')}?=`;
-  }
-  return name;
-}
-
-function formatAddress(address) {
-  // Pl. address: 'Árvíztűrő Tükörfúrógép <valaki@example.com>' vagy csak 'valaki@example.com'
-  const match = address.match(/^(.*)<(.+@.+)>$/);
-  if (match) {
-    const name = match[1].trim().replace(/^"|"$/g, '');
-    const email = match[2].trim();
-    return `"${encodeRFC2047Name(name)}" <${email}>`;
-  }
-  return address;
 }
