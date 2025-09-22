@@ -1222,11 +1222,29 @@ ipcMain.handle('login-with-gmail', async () => {
     };
     saveAuthState();
     startEmailMonitoring();
-    return true;
+    // Save the authenticated email to the database
+    
+    const dbUrl = process.env.DATABASE_URL; // Az adatbázis URL-t az .env fájlból olvassuk
+    if (!dbUrl) {
+      throw new Error('DATABASE_URL környezeti változó nincs beállítva!');
+    }
+
+    const emailInUse = activationEmail || null;
+    const connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
+    const [result] = await connection.execute(
+      'UPDATE user SET emailInUse = ? WHERE email = ?;',
+      [email, emailInUse]
+    );
+    console.log("Email címek az adatbézisban frissítve:", email, emailInUse); 
+    console.log('[SQL] UPDATE result:', result); // LOG
+    await connection.end();
+
   } catch (error) {
     console.error('Gmail bejelentkezési hiba:', error);
     return false;
   }
+  return true;
+
 });
 
 ipcMain.handle('check-auth-status', async () => {
@@ -1280,6 +1298,21 @@ ipcMain.handle('login-with-smtp', async (event, config) => {
           password: config.password // We need to store the password for reconnection
         }
       };
+
+      const dbUrl = process.env.DATABASE_URL; // Az adatbázis URL-t az .env fájlból olvassuk
+      if (!dbUrl) {
+        throw new Error('DATABASE_URL környezeti változó nincs beállítva!');
+      }
+
+      const emailInUse = activationEmail || null;
+      const connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
+      const [result] = await connection.execute(
+        'UPDATE user SET emailInUse = ? WHERE email = ?;',
+        [config.email, emailInUse]
+      );
+      console.log('[SQL] UPDATE result:', result); // LOG
+      await connection.end();
+
       saveAuthState();
       startEmailMonitoring();
       return true;
@@ -1711,3 +1744,42 @@ function appendSentEmailLog(entry) {
   }
 
 }
+
+// Add IPC handlers for email storage
+ipcMain.handle('set-email', async (event, email) => {
+  try {
+    // Save email to a persistent storage (e.g., a file or database)
+    authState.credentials = { email };
+    saveAuthState();
+    return { success: true };
+  } catch (error) {
+    console.error('Error saving email:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-email', async () => {
+  try {
+    // Retrieve email from persistent storage
+    return authState.credentials?.email || null;
+  } catch (error) {
+    console.error('Error retrieving email:', error);
+    return null;
+  }
+});
+
+// Új változó az aktivációs email cím tárolására
+let activationEmail = null;
+
+// Új IPC handler az aktivációs email cím beállítására
+ipcMain.handle('set-activation-email', async (event, email) => {
+  activationEmail = email;
+  console.log('Activation email set:', activationEmail);
+  return true;
+});
+
+// Új IPC handler az aktivációs email cím lekérdezésére
+ipcMain.handle('get-activation-email', async () => {
+  return activationEmail;
+});
+

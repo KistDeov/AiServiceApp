@@ -73,6 +73,10 @@ contextBridge.exposeInMainWorld('api', {
   isDemoOver: () => ipcRenderer.invoke('is-demo-over'),
   receive: (channel, callback) => ipcRenderer.on(channel, (_, data) => callback(data)),
   remove: (channel, callback) => ipcRenderer.removeListener(channel, callback),
+  setEmail: (email) => ipcRenderer.invoke('set-email', email),
+  getEmail: () => ipcRenderer.invoke('get-email'),
+  setActivationEmail: (email) => ipcRenderer.invoke('set-activation-email', email),
+  getActivationEmail: () => ipcRenderer.invoke('get-activation-email')
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {

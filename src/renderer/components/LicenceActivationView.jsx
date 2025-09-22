@@ -33,18 +33,21 @@ const LicenceActivationView = ({}) => {
         setSubmitting(true);
         try {
             const payload = { email: email.trim(), licenceKey: normalisedLicence };
-            // IPC hívás a backendhez
+            // IPC call to backend
             const res = await window.api.checkLicence(payload);
             if (res.success) {
-                // Sikeres licenc: állítsd be a licenc állapotot (pl. localStorage vagy IPC)
+                // Successful license: set license state via IPC
+                await window.api.setEmail(email.trim());
+                // Az email továbbítása az új IPC handlernek
+                await window.api.setActivationEmail(email.trim());
                 localStorage.setItem('isLicenced', 'true');
                 localStorage.setItem('licence', normalisedLicence);
-                window.location.reload(); // vagy: tovább engeded a fő appba
+                window.location.reload(); // or navigate to the main app
             } else {
-                setError(res.error || "Hibás licenc vagy email.");
+                setError(res.error || "Invalid license or email.");
             }
         } catch (err) {
-            setError("Hálózati vagy szerver hiba.");
+            setError("Network or server error.");
         } finally {
             setSubmitting(false);
         }
