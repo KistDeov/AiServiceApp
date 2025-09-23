@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('api', {
   setNotifyOnAutoReply: (value) => ipcRenderer.invoke('setNotifyOnAutoReply', value),
   getNotificationEmail: () => ipcRenderer.invoke('getNotificationEmail'),
   setNotificationEmail: (email) => ipcRenderer.invoke('setNotificationEmail', email),
+  onShowCustomView: (callback) => ipcRenderer.on('show-custom-view', (_, data) => callback(data)),
+  removeShowCustomViewListener: () => ipcRenderer.removeAllListeners('show-custom-view'),
   // Megjelenítési mód kezelése
   getDisplayMode: () => ipcRenderer.invoke('getDisplayMode'),
   setDisplayMode: (mode) => ipcRenderer.invoke('setDisplayMode', mode),
@@ -76,11 +78,21 @@ contextBridge.exposeInMainWorld('api', {
   setEmail: (email) => ipcRenderer.invoke('set-email', email),
   getEmail: () => ipcRenderer.invoke('get-email'),
   setActivationEmail: (email) => ipcRenderer.invoke('set-activation-email', email),
-  getActivationEmail: () => ipcRenderer.invoke('get-activation-email')
+  getActivationEmail: () => ipcRenderer.invoke('get-activation-email'),
+  sendToMain: (channel, message) => {
+    ipcRenderer.send(channel, message);
+  },
+  onUpdateDownloadProgress: (callback) => {
+    ipcRenderer.on('update-download-progress', (_, progress) => callback(progress));
+  },
+
+  removeUpdateDownloadProgressListener: (callback) => {
+    ipcRenderer.removeListener('update-download-progress', callback);
+  },
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  exitApp: () => ipcRenderer.send('exit-app')
+  exitApp: () => ipcRenderer.send('exit-app'),
 });
 
 contextBridge.exposeInMainWorld('electron', { ipcRenderer });

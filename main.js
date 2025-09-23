@@ -1402,30 +1402,33 @@ app.whenReady().then(async () => {
   // Frissítési kliens és események
   autoUpdater.checkForUpdatesAndNotify();
 
+
   autoUpdater.on('update-available', () => {
-    console.log('Frissítés elérhető!');
+    console.log('Frissítés elérhető! Sending show-custom-view event.');
     if (mainWindow) {
-      mainWindow.webContents.send('update-available');
-      mainWindow.webContents.send('show-custom-view', {
-        view: 'UpdateAvailableView',
-        message: 'Új frissítés érhető el az alkalmazáshoz. A letöltés folyamatban van.'
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Frissítés elérhető',
+        message: 'Új frissítés érhető el az alkalmazáshoz. A letöltés folyamatban van.',
+        buttons: ['OK']
       });
     }
   });
-
-  autoUpdater.on('update-not-available', () => {
-    console.log('Nincs új frissítés.');
+  
+  autoUpdater.on('download-progress', (progressTrack) => {
+    console.log(`Frissítés letöltése: ${progressTrack.percent}%`);
     if (mainWindow) {
-      mainWindow.webContents.send('update-not-available');
+        mainWindow.webContents.send('update-download-progress', progressTrack.percent);
     }
   });
 
   autoUpdater.on('update-downloaded', () => {
-    console.log('Frissítés letöltve, újraindítás szükséges!');
+    console.log('Frissítés letöltve! Sending show-custom-view event.');
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded');
-      mainWindow.webContents.send('show-custom-view', {
-        view: 'UpdateDownloadedView',
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Frissítés letöltve',
         message: 'Az új frissítés letöltése befejeződött. Az alkalmazás újraindításával telepítheted a frissítést.',
         buttons: ['Újraindítás', 'Később']
       });
@@ -1774,5 +1777,22 @@ ipcMain.handle('set-activation-email', async (event, email) => {
 // Új IPC handler az aktivációs email cím lekérdezésére
 ipcMain.handle('get-activation-email', async () => {
   return activationEmail;
+});
+
+// Logging
+const logFilePath = path.join(app.getPath('userData'), 'app.log');
+
+if (!fs.existsSync(app.getPath('userData'))) {
+  fs.mkdirSync(app.getPath('userData'), { recursive: true });
+}
+
+function logToFile(message) {
+  const timestamp = new Date().toISOString();
+  fs.appendFileSync(logFilePath, `[${timestamp}] ${message}\n`);
+}
+
+ipcMain.on('log', (event, message) => {
+  console.log(`[Renderer Log]: ${message}`);
+  logToFile(`[Renderer Log]: ${message}`);
 });
 

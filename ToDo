@@ -1,5 +1,6 @@
 Fontos:
     - Frissítés view nem megy
+    - smtp ben nem kerül bele az elküldöttek közé a levél
     - Új frontend dizájn
 Ráér:
     - .env nem biztonságos

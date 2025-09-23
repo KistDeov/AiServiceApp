@@ -477,7 +477,8 @@ const App = () => {
   const [startTime, setStartTime] = useState("08:00");
   const [endTime, setEndTime] = useState("16:00");
   const [isUpdating, setIsUpdating] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState(null);
+  const [updateStatus, setUpdateStatus] = useState({ message: '', buttons: [] });
+  const [updateProgress, setUpdateProgress] = useState(null);
 
   // Navbar állapot inicializálása settingsből
   useEffect(() => {
@@ -678,8 +679,22 @@ const App = () => {
     window.api.setTimedAutoSend && window.api.setTimedAutoSend(event.target.checked);
   };
 
+  useEffect(() => {
+    const handleUpdateProgress = (_, progress) => {
+      setUpdateProgress(progress);
+    };
+
+    window.api.onUpdateDownloadProgress(handleUpdateProgress);
+
+    return () => {
+      window.api.removeUpdateDownloadProgressListener(handleUpdateProgress);
+    };
+  }, []);
+
   const renderView = () => {
     switch (activeView) {
+      case 'update':
+        return <UpdateView message={updateStatus?.message} buttons={updateStatus?.buttons} />;
       case 'mails': return <MailsView showSnackbar={showSnackbar} />;
       case 'sentMails': return <SentMailsView showSnackbar={showSnackbar} />;
       case 'mailStructure': return <MailStructureView showSnackbar={showSnackbar} />;
@@ -766,49 +781,6 @@ const App = () => {
     };
   }, []);
 
-  // IPC események kezelése
-  useEffect(() => {
-  const { ipcRenderer } = window.electron || {};
-
-  if (!ipcRenderer) return;
-
-  const handleShowCustomView = (event, { view, message, buttons }) => {
-    console.log('Custom view event received:', { view, message, buttons });
-
-    if (view === 'UpdateAvailableView') {
-      ReactDOM.createRoot(document.getElementById('root')).render(
-        <UpdateView message={message} />
-      );
-    } else if (view === 'UpdateDownloadedView') {
-      ReactDOM.createRoot(document.getElementById('root')).render(
-        <UpdateView message={message} buttons={buttons} />
-      );
-    }
-  };
-
-  const addListener = ipcRenderer.on || ipcRenderer.addListener;
-  const removeListener = ipcRenderer.off || ipcRenderer.removeListener;
-
-  if (addListener) {
-    addListener.call(ipcRenderer, 'show-custom-view', handleShowCustomView);
-  }
-
-  return () => {
-    if (removeListener) {
-      removeListener.call(ipcRenderer, 'show-custom-view', handleShowCustomView);
-    }
-  };
-}, []);
-
-  if (isUpdating) {
-    return (
-      <ThemeProvider theme={themes[themeName] || themes.black}>
-        <CssBaseline />
-        <UpdateView />
-      </ThemeProvider>
-    );
-  }
-
   // Demo állapot folyamatos ellenőrzése
   useEffect(() => {
     let cancelled = false;
@@ -889,6 +861,15 @@ const App = () => {
           setIsTutorialShown(true);
           localStorage.setItem('isTutorialShown', 'true');
         }} />
+      </ThemeProvider>
+    );
+  }
+
+  if (updateProgress !== null) {
+    return (
+      <ThemeProvider theme={themes[themeName] || themes.black}>
+        <CssBaseline />
+        <UpdateView />
       </ThemeProvider>
     );
   }
@@ -1064,7 +1045,7 @@ const App = () => {
               onMouseLeave={handleDrawerMouseLeave}
             >
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', p: 1 }}>
-                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.18</Typography>
+                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.19</Typography>
                 <IconButton onClick={handlePinClick} size="small" color={isPinned ? 'error' : 'default'}>
                   {isPinned ? (
                     <FaTimesCircle size={20} color="#d32f2f" />
@@ -1216,3 +1197,11 @@ if (document.readyState === 'loading') {
 } else {
   initializeReact();
 }
+
+useEffect(() => {
+    window.api.sendToMain('log', 'Parent component mounted.');
+
+    return () => {
+      window.api.sendToMain('log', 'Parent component unmounted.');
+    };
+  }, []);
