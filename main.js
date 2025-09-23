@@ -1406,11 +1406,9 @@ app.whenReady().then(async () => {
     console.log('Frissítés elérhető!');
     if (mainWindow) {
       mainWindow.webContents.send('update-available');
-      dialog.showMessageBox(mainWindow, {
-        type: 'info',
-        title: 'Frissítés elérhető',
-        message: 'Új frissítés érhető el az alkalmazáshoz. A letöltés folyamatban van.',
-        buttons: ['OK']
+      mainWindow.webContents.send('show-custom-view', {
+        view: 'UpdateAvailableView',
+        message: 'Új frissítés érhető el az alkalmazáshoz. A letöltés folyamatban van.'
       });
     }
   });
@@ -1426,15 +1424,10 @@ app.whenReady().then(async () => {
     console.log('Frissítés letöltve, újraindítás szükséges!');
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded');
-      dialog.showMessageBox(mainWindow, {
-        type: 'info',
-        title: 'Frissítés letöltve',
+      mainWindow.webContents.send('show-custom-view', {
+        view: 'UpdateDownloadedView',
         message: 'Az új frissítés letöltése befejeződött. Az alkalmazás újraindításával telepítheted a frissítést.',
         buttons: ['Újraindítás', 'Később']
-      }).then(result => {
-        if (result.response === 0) { // 'Újraindítás' gomb
-          autoUpdater.quitAndInstall();
-        }
       });
     }
   });

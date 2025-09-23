@@ -751,36 +751,6 @@ const App = () => {
   }, [isOnline]);
 
   useEffect(() => {
-    const ipc = window.electron?.ipcRenderer;
-    const addListener = (channel, fn) => {
-      if (!ipc) return;
-      if (typeof ipc.on === 'function') ipc.on(channel, fn);
-      else if (typeof ipc.addListener === 'function') ipc.addListener(channel, fn);
-    };
-    const removeListener = (channel, fn) => {
-      if (!ipc) return;
-      if (typeof ipc.removeListener === 'function') ipc.removeListener(channel, fn);
-      else if (typeof ipc.off === 'function') ipc.off(channel, fn);
-    };
-
-    const handleUpdateAvailable = () => {
-      setIsUpdating(true); // Frissítés elérhető, megjelenítjük az UpdateView-t
-    };
-
-    const handleUpdateDownloaded = () => {
-      setIsUpdating(false); // Frissítés letöltve, újraindítás szükséges
-    };
-
-    addListener('update-available', handleUpdateAvailable);
-    addListener('update-downloaded', handleUpdateDownloaded);
-
-    return () => {
-      removeListener('update-available', handleUpdateAvailable);
-      removeListener('update-downloaded', handleUpdateDownloaded);
-    };
-  }, []);
-
-  useEffect(() => {
     const handleUpdateAvailable = () => setUpdateStatus('available');
     const handleUpdateDownloaded = () => setUpdateStatus('downloaded');
     const handleUpdateNotAvailable = () => setUpdateStatus(null);
@@ -795,6 +765,38 @@ const App = () => {
       window.api.remove('update-not-available', handleUpdateNotAvailable);
     };
   }, []);
+
+  // IPC események kezelése
+  useEffect(() => {
+  const { ipcRenderer } = window.electron || {};
+
+  if (!ipcRenderer) return;
+
+  const handleShowCustomView = (event, { view, message, buttons }) => {
+    if (view === 'UpdateAvailableView') {
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        <UpdateView message={message} />
+      );
+    } else if (view === 'UpdateDownloadedView') {
+      ReactDOM.createRoot(document.getElementById('root')).render(
+        <UpdateView message={message} buttons={buttons} />
+      );
+    }
+  };
+
+  const addListener = ipcRenderer.on || ipcRenderer.addListener;
+  const removeListener = ipcRenderer.off || ipcRenderer.removeListener;
+
+  if (addListener) {
+    addListener.call(ipcRenderer, 'show-custom-view', handleShowCustomView);
+  }
+
+  return () => {
+    if (removeListener) {
+      removeListener.call(ipcRenderer, 'show-custom-view', handleShowCustomView);
+    }
+  };
+}, []);
 
   if (isUpdating) {
     return (
@@ -1060,7 +1062,7 @@ const App = () => {
               onMouseLeave={handleDrawerMouseLeave}
             >
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', p: 1 }}>
-                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.16</Typography>
+                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.17</Typography>
                 <IconButton onClick={handlePinClick} size="small" color={isPinned ? 'error' : 'default'}>
                   {isPinned ? (
                     <FaTimesCircle size={20} color="#d32f2f" />
