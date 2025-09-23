@@ -1,7 +1,7 @@
 import React from "react";
-import { Box, Typography, CircularProgress } from "@mui/material";
+import { Box, Typography, CircularProgress, Button } from "@mui/material";
 
-const UpdateView = () => {
+const UpdateView = ({ message, buttons }) => {
   return (
     <Box
       sx={{
@@ -16,11 +16,25 @@ const UpdateView = () => {
     >
       <CircularProgress size={60} sx={{ mb: 3 }} />
       <Typography variant="h5" gutterBottom>
-        Frissítések letöltése folyamatban...
+        {message || "Frissítések letöltése folyamatban..."}
       </Typography>
       <Typography variant="body1">
         Ez eltarthat néhány percig
       </Typography>
+      {buttons && (
+        <Box sx={{ mt: 3, display: "flex", gap: 2 }}>
+          {buttons.map((button, index) => (
+            <Button
+              key={index}
+              variant={button.variant || "contained"}
+              color={button.color || "primary"}
+              onClick={button.onClick}
+            >
+              {button.label}
+            </Button>
+          ))}
+        </Box>
+      )}
     </Box>
   );
 };
