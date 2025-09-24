@@ -858,12 +858,45 @@ ipcMain.handle('savePromptSettings', async (event, { greeting, signature, signat
   saveSettings(settings);
   return true;
 });
+// Ipc handlers for web settings
+ipcMain.handle('getWebSettings', async () => {
+  return {
+    webUrls: settings.webUrls || defaultSettings.webUrls
+  };
+});
+ipcMain.handle('saveWebSettings', async (event, { webUrls }) => {
+  settings.webUrls = Array.isArray(webUrls) ? webUrls : [];
+  saveSettings(settings);
+  return true;
+});
+
+// Fetch data from the web URL
 
 // Refactor promptBase and generateReply
-let promptBase = `Egy ügyféltől a következő email érkezett:\n\n{greeting}\n\n"{email.body}"\n\n{imageDescriptions}\n\n{excelImageDescriptions}\n\nA következő adatokat használd fel a válaszadáshoz:\n{excelData}\n\n{signature}`;
+let promptBase = `Egy ügyféltől a következő email érkezett:\n\n{greeting}\n\n"{email.body}"\n\n{imageDescriptions}\n\n{excelImageDescriptions}\n\nA következő adatokat használd fel a válaszadáshoz:\n{excelData}\n\n{signature}\n\n{webUrls}\nEzekről a htmlek-ről is gyűjtsd ki a szükséges információkat a válaszadáshoz: {webUrls}, gyűjts ki a szükséges információkat, linkeket, telefonszámokat, email címeket és így tovább és ezeket küldd vissza\n\n`;
 
 async function generateReply(email) {
   try {
+    let htmlContents = [];
+
+    if (settings.webUrls && Array.isArray(settings.webUrls)) {
+      for (const url of settings.webUrls) {
+        try {
+          const response = await fetch(url);
+          if (response.ok) {
+            const html = await response.text();
+            htmlContents.push(html);
+          } else {
+            console.error(`Failed to fetch web URL (${url}): ${response.statusText}`);
+          }
+        } catch (error) {
+          console.error(`Error fetching web URL (${url}):`, error);
+        }
+      }
+    }
+
+    const combinedHtml = htmlContents.join('\n\n');
+
     // Excel adatok és képek beolvasása
     const { allData: excelData, allImages: excelImages } = await readExcelDataWithImages();
     // Excel adatok formázása
@@ -881,6 +914,7 @@ async function generateReply(email) {
         return `Munkalap: ${sheetName}\n${rowsText}`;
       })
       .join('\n\n');
+
     // Excel képek leírása
     let excelImageDescriptions = '';
     if (excelImages && excelImages.length > 0) {
@@ -889,6 +923,7 @@ async function generateReply(email) {
       excelImageDescriptions += aiDescs.map((desc, idx) => `\n${idx + 1}. ${desc}`).join('');
       excelImageDescriptions += '\n';
     }
+
     // Use greeting and signature from settings
     const greeting = settings.greeting || defaultSettings.greeting;
     const signature = settings.signature || defaultSettings.signature;
@@ -907,23 +942,26 @@ async function generateReply(email) {
       }).join('');
       imageDescriptions += '\n';
     }
+
     const finalPrompt = promptBase
       .replace('{greeting}', greeting)
       .replace('{signature}', signature)
       .replace('{email.body}', email.body)
       .replace('{excelData}', formattedExcelData)
       .replace('{imageDescriptions}', imageDescriptions)
-      .replace('{excelImageDescriptions}', excelImageDescriptions);
+      .replace('{excelImageDescriptions}', excelImageDescriptions)
+      .replace('{webUrls}', combinedHtml || 'N/A');
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { 
           role: "system", 
-          content: "Te egy segítőkész asszisztens vagy, aki udvarias és professzionális válaszokat ír az ügyfeleknek. Az Excel adatokat használd fel a válaszadáshoz, ha releváns információt találsz bennük. Az adatok különböző munkalapokról származnak, mindegyiket vedd figyelembe a válaszadásnál." 
+          content: "Te egy segítőkész asszisztens vagy, aki udvarias és professzionális válaszokat ír az ügyfeleknek. Az Excel adatokat és a megadott html-ről szerzett információkat használd fel a válaszadáshoz, ha releváns információt találsz bennük. Az adatok különböző munkalapokról származnak, mindegyiket vedd figyelembe a válaszadásnál. Elsődlegesen a html-ről származó információkat használd, ezek lehetnek linkek, email címek , telefonszámok és így tovább." 
         },
         { role: "user", content: finalPrompt }
       ],
-      temperature: 0.7,
+      temperature: 1,
     });
     return completion.choices[0].message.content;
   } catch (error) {

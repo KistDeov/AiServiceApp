@@ -12,5 +12,6 @@
   "minEmailDate": "",
   "maxEmailDate": "",
   "notifyOnAutoReply": false,
-  "notificationEmail": ""
+  "notificationEmail": "",
+  "webUrls": []
 }

@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('api', {
   setLeftNavbarMode: (mode) => ipcRenderer.invoke('setLeftNavbarMode', mode),
   getPromptSettings: () => ipcRenderer.invoke('getPromptSettings'),
   savePromptSettings: (data) => ipcRenderer.invoke('savePromptSettings', data),
+  getWebSettings: () => ipcRenderer.invoke('getWebSettings'),
+  saveWebSettings: (data) => ipcRenderer.invoke('saveWebSettings', data),
   getReplyStats: () => ipcRenderer.invoke('get-reply-stats'),
   readSentEmailsLog: () => ipcRenderer.invoke('read-sent-emails-log'),
   getSignatureImagePath: () => {

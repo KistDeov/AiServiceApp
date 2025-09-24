@@ -1,7 +1,7 @@
 Fontos:
-    - Excel mellé linkkeket is lehessen megadni ami a cég webhelye
     - smtp ben nem kerül bele az elküldöttek közé a levél
-    - Új frontend dizájn (Minden oldal egyesével végignézni)
+    - gmail küldés során nincs ott az eredeti levél
+    - Új frontend dizájn (Minden oldal egyesével végignézni, új ikon szín fekete-sárga)
 Ráér:
     - .env nem biztonságos
     - Login felvillan hiába vagyok bejelentkezve
