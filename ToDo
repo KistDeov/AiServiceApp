@@ -1,8 +1,9 @@
 Fontos:
-    - smtp ben nem kerül bele az elküldöttek közé a levél
     - gmail küldés során nincs ott az eredeti levél
+    - Ellenőrizze az aktív licenszt
     - Új frontend dizájn (Minden oldal egyesével végignézni, új ikon szín fekete-sárga)
 Ráér:
+    - Ha a program files ba megy az appa akkor nem hízik az elküldött levelek listája    
     - .env nem biztonságos
     - Login felvillan hiába vagyok bejelentkezve
     - Be lehessen állítani, hogy melyik email-címekre válaszoljon 

@@ -1,6 +1,6 @@
 {
   "name": "aimail",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "description": "An aplication that uses AI to answer mails",
   "main": "main.js",
   "type": "module",
@@ -29,8 +29,9 @@
       "oneClick": false,
       "installerIcon": "./assets/icon.ico",
       "uninstallerIcon": "./assets/icon.ico",
-      "uninstallDisplayName": "AI Service App Uninstaller",
-      "allowToChangeInstallationDirectory": true
+      "uninstallDisplayName": "Ai Mail Uninstaller",
+      "allowToChangeInstallationDirectory": true,
+      "installDirectory": "C:\\Ai Mail"
     },
     "publish": [
       {

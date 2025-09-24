@@ -873,7 +873,7 @@ ipcMain.handle('saveWebSettings', async (event, { webUrls }) => {
 // Fetch data from the web URL
 
 // Refactor promptBase and generateReply
-let promptBase = `Egy ügyféltől a következő email érkezett:\n\n{greeting}\n\n"{email.body}"\n\n{imageDescriptions}\n\n{excelImageDescriptions}\n\nA következő adatokat használd fel a válaszadáshoz:\n{excelData}\n\n{signature}\n\n{webUrls}\nEzekről a htmlek-ről is gyűjtsd ki a szükséges információkat a válaszadáshoz: {webUrls}, gyűjts ki a szükséges információkat, linkeket, telefonszámokat, email címeket és így tovább és ezeket küldd vissza\n\n`;
+let promptBase = `Egy ügyféltől a következő email érkezett:\n\n{greeting}\n\n"{email.body}"\n\n{imageDescriptions}\n\n{excelImageDescriptions}\n\nA következő adatokat használd fel a válaszadáshoz:\n{excelData}\n\n{signature}\n\n{webUrls}\nEzekről a htmlek-ről is gyűjtsd ki a szükséges információkat a válaszadáshoz: {webUrls}, gyűjts ki a szükséges információkat, linkeket, telefonszámokat, email címeket és így tovább és ezeket küldd vissza.\n\n`;
 
 async function generateReply(email) {
   try {

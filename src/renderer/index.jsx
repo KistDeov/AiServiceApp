@@ -1066,7 +1066,7 @@ const App = () => {
               onMouseLeave={handleDrawerMouseLeave}
             >
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', p: 1 }}>
-                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.21</Typography>
+                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.22</Typography>
                 <IconButton onClick={handlePinClick} size="small" color={isPinned ? 'error' : 'default'}>
                   {isPinned ? (
                     <FaTimesCircle size={20} color="#d32f2f" />
