@@ -1,7 +1,7 @@
 Fontos:
-    - Frissítés view nem megy
+    - Excel mellé linkkeket is lehessen megadni ami a cég webhelye
     - smtp ben nem kerül bele az elküldöttek közé a levél
-    - Új frontend dizájn
+    - Új frontend dizájn (Minden oldal egyesével végignézni)
 Ráér:
     - .env nem biztonságos
     - Login felvillan hiába vagyok bejelentkezve

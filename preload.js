@@ -89,6 +89,16 @@ contextBridge.exposeInMainWorld('api', {
   removeUpdateDownloadProgressListener: (callback) => {
     ipcRenderer.removeListener('update-download-progress', callback);
   },
+  onUpdateAvailable: (callback) => {
+    ipcRenderer.on('update-status', (_, status) => callback(status));
+  },
+  onUpdateReady: (callback) => { 
+    ipcRenderer.on('update-status', (_, status) => callback(status));
+  },
+  handleUpdateAction: (action) => {
+    ipcRenderer.invoke('handle-update-action', action);
+  },
+  restartApp: () => ipcRenderer.invoke('restart-app')
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {

@@ -11,7 +11,8 @@ const UpdateView = () => {
         alignItems: "center",
         justifyContent: "center",
         minHeight: "300px",
-        textAlign: "center"
+        textAlign: "center",
+        mt: 16,
       }}
     >
       <CircularProgress size={60} sx={{ mb: 3 }} />
@@ -19,7 +20,7 @@ const UpdateView = () => {
         Frissítések letöltése folyamatban...
       </Typography>
       <Typography variant="body1">
-        Ez eltarthat néhány percig
+        Ez eltarthat néhány másodpercig. Kérjük, NE zárd be az alkalmazást!
       </Typography>
     </Box>
   );

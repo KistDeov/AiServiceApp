@@ -3,7 +3,7 @@ import { findFile } from './src/utils/findFile.js';
 dotenv.config({ path: findFile('.env') });
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { app, BrowserWindow, ipcMain, dialog, shell} from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, webContents} from 'electron';
 import { getUnreadEmails, getEmailById } from './gmail.js';
 import { OpenAI } from 'openai';
 import XLSX from 'xlsx';
@@ -1092,6 +1092,11 @@ ipcMain.handle('exit-app', () => {
   app.quit();
 });
 
+ipcMain.handle('restart-app', () => {
+  app.relaunch();
+  app.exit(0);
+});
+
 ipcMain.handle('get-email-by-id', async (event, id) => {
   try {
     return await getEmailByIdBasedOnProvider(id);
@@ -1404,34 +1409,23 @@ app.whenReady().then(async () => {
 
 
   autoUpdater.on('update-available', () => {
-    console.log('Frissítés elérhető! Sending show-custom-view event.');
+    console.log('Frissítés elérhető!');
     if (mainWindow) {
-      dialog.showMessageBox(mainWindow, {
-        type: 'info',
-        title: 'Frissítés elérhető',
-        message: 'Új frissítés érhető el az alkalmazáshoz. A letöltés folyamatban van.',
-        buttons: ['OK']
-      });
+        mainWindow.webContents.send('update-status', 'available');
     }
   });
   
   autoUpdater.on('download-progress', (progressTrack) => {
     console.log(`Frissítés letöltése: ${progressTrack.percent}%`);
     if (mainWindow) {
-        mainWindow.webContents.send('update-download-progress', progressTrack.percent);
+      mainWindow.webContents.send('update-download-progress', progressTrack.percent);
     }
   });
 
   autoUpdater.on('update-downloaded', () => {
-    console.log('Frissítés letöltve! Sending show-custom-view event.');
+    console.log('Frissítés letöltve!');
     if (mainWindow) {
-      mainWindow.webContents.send('update-downloaded');
-      dialog.showMessageBox(mainWindow, {
-        type: 'info',
-        title: 'Frissítés letöltve',
-        message: 'Az új frissítés letöltése befejeződött. Az alkalmazás újraindításával telepítheted a frissítést.',
-        buttons: ['Újraindítás', 'Később']
-      });
+      mainWindow.webContents.send('update-status', 'ready');
     }
   });
 
@@ -1740,6 +1734,8 @@ function appendSentEmailLog(entry) {
   }
 
 }
+
+
 
 // Add IPC handlers for email storage
 ipcMain.handle('set-email', async (event, email) => {

@@ -44,6 +44,8 @@ import DemoOverView from './components/DemoOverView';
 import HelpView from './components/HelpView';
 import NoConnectionView from './components/NoConnectionView.jsx';
 import UpdateView from "./components/UpdateView.jsx";
+import UpdateAvailableView from "./components/UpdateAvailableView.jsx";
+import UpdateReadyView from "./components/UpdateReadyView.jsx";
 import LicenceActivationView from './components/LicenceActivationView.jsx';
 import { FaRegQuestionCircle, FaBars, FaThumbtack, FaHome, FaEnvelope, FaDatabase, FaRobot, FaCog, FaSignOutAlt, FaPowerOff, FaUserFriends } from 'react-icons/fa';
 import { FaEnvelopeCircleCheck } from "react-icons/fa6";
@@ -476,9 +478,8 @@ const App = () => {
   const [timedAutoSend, setTimedAutoSend] = useState(true);
   const [startTime, setStartTime] = useState("08:00");
   const [endTime, setEndTime] = useState("16:00");
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState({ message: '', buttons: [] });
   const [updateProgress, setUpdateProgress] = useState(null);
+  const [updateStatus, setUpdateStatus] = useState(null);
 
   // Navbar állapot inicializálása settingsből
   useEffect(() => {
@@ -679,6 +680,7 @@ const App = () => {
     window.api.setTimedAutoSend && window.api.setTimedAutoSend(event.target.checked);
   };
 
+  // Frissítési folyamat kezelése
   useEffect(() => {
     const handleUpdateProgress = (_, progress) => {
       setUpdateProgress(progress);
@@ -691,18 +693,36 @@ const App = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const handleUpdateStatus = (_, status) => {
+      setUpdateStatus(status);
+      if (status === 'available') {
+        console.log('Update available!');
+        setActiveView('updateAvailable');
+      } else if (status === 'ready') {
+        console.log('Update ready!');
+        setActiveView('updateReady');
+      }
+    };
+
+    window.api.onUpdateAvailable(() => handleUpdateStatus(null, 'available'));
+    window.api.onUpdateReady(() => handleUpdateStatus(null, 'ready'));
+
+    return () => {
+      window.api.onUpdateAvailable(null);
+      window.api.onUpdateReady(null);
+    };
+  }, []);
+
   const renderView = () => {
     switch (activeView) {
-      case 'update':
-        return <UpdateView message={updateStatus?.message} buttons={updateStatus?.buttons} />;
+      case 'update': return <UpdateView />;
+      case 'updateAvailable': return <UpdateAvailableView onClose={() => { setActiveView(''); setUpdateStatus(''); }} />;
+      case 'updateReady': return <UpdateReadyView onClose={() => { setActiveView(''); setUpdateStatus(''); }} />;
       case 'mails': return <MailsView showSnackbar={showSnackbar} />;
       case 'sentMails': return <SentMailsView showSnackbar={showSnackbar} />;
       case 'mailStructure': return <MailStructureView showSnackbar={showSnackbar} />;
-      case 'settings': return <SettingsView
-  themeName={themeName}
-  setThemeName={setThemeName}
-  onAutoSendChanged={setAutoSend}
-/>;
+      case 'settings': return <SettingsView themeName={themeName} setThemeName={setThemeName} onAutoSendChanged={setAutoSend}/>;
       case 'import': return <ImportFileView showSnackbar={showSnackbar} />;
       case 'prompt': return <PromptView showSnackbar={showSnackbar} />;
       case 'help': return <HelpView showSnackbar={showSnackbar} />;
@@ -764,22 +784,6 @@ const App = () => {
       if (retryInterval) clearInterval(retryInterval);
     };
   }, [isOnline]);
-
-  useEffect(() => {
-    const handleUpdateAvailable = () => setUpdateStatus('available');
-    const handleUpdateDownloaded = () => setUpdateStatus('downloaded');
-    const handleUpdateNotAvailable = () => setUpdateStatus(null);
-
-    window.api.receive('update-available', handleUpdateAvailable);
-    window.api.receive('update-downloaded', handleUpdateDownloaded);
-    window.api.receive('update-not-available', handleUpdateNotAvailable);
-
-    return () => {
-      window.api.remove('update-available', handleUpdateAvailable);
-      window.api.remove('update-downloaded', handleUpdateDownloaded);
-      window.api.remove('update-not-available', handleUpdateNotAvailable);
-    };
-  }, []);
 
   // Demo állapot folyamatos ellenőrzése
   useEffect(() => {
@@ -870,6 +874,23 @@ const App = () => {
       <ThemeProvider theme={themes[themeName] || themes.black}>
         <CssBaseline />
         <UpdateView />
+      </ThemeProvider>
+    );
+  }
+
+  if (updateStatus === 'available') {
+    return (
+      <ThemeProvider theme={themes[themeName] || themes.black}>
+        <CssBaseline />
+        <UpdateAvailableView onClose={() => {setActiveView(''), setUpdateStatus('')}} />
+      </ThemeProvider>
+    );
+  }
+  if (updateStatus === 'ready') {
+    return (
+      <ThemeProvider theme={themes[themeName] || themes.black}>
+        <CssBaseline />
+        <UpdateReadyView onClose={() => {setActiveView(''), setUpdateStatus('')}} />
       </ThemeProvider>
     );
   }
@@ -1045,7 +1066,7 @@ const App = () => {
               onMouseLeave={handleDrawerMouseLeave}
             >
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', p: 1 }}>
-                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.19</Typography>
+                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.20</Typography>
                 <IconButton onClick={handlePinClick} size="small" color={isPinned ? 'error' : 'default'}>
                   {isPinned ? (
                     <FaTimesCircle size={20} color="#d32f2f" />
