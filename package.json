@@ -30,8 +30,7 @@
       "installerIcon": "./assets/icon.ico",
       "uninstallerIcon": "./assets/icon.ico",
       "uninstallDisplayName": "Ai Mail Uninstaller",
-      "allowToChangeInstallationDirectory": true,
-      "installDirectory": "C:\\Ai Mail"
+      "allowToChangeInstallationDirectory": true
     },
     "publish": [
       {
