@@ -1,6 +1,6 @@
 {
   "name": "aimail",
-  "version": "1.0.22",
+  "version": "1.0.23",
   "description": "An aplication that uses AI to answer mails",
   "main": "main.js",
   "type": "module",
@@ -23,14 +23,16 @@
       "target": [
         "nsis"
       ],
-      "icon": "./assets/icon.ico"
+      "icon": "./assets/icon.ico",
+      "requestedExecutionLevel": "requireAdministrator"
     },
     "nsis": {
       "oneClick": false,
       "installerIcon": "./assets/icon.ico",
       "uninstallerIcon": "./assets/icon.ico",
       "uninstallDisplayName": "Ai Mail Uninstaller",
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true
     },
     "publish": [
       {

@@ -38,8 +38,10 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
     async function fetchStats() {
       try {
         const stats = await window.api.getReplyStats?.();
+        console.log('[HomeView] Fetched stats:', stats);
         if (isMounted) setStatsData(stats || []);
       } catch (e) {
+        console.error('[HomeView] Error fetching stats:', e);
         if (isMounted) setStatsData([]);
       } finally {
         setStatsLoading(false);
@@ -81,4 +83,4 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
   );
 };
 
-export default HomeView; 
+export default HomeView;

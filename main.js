@@ -519,7 +519,12 @@ function startEmailMonitoring() {
                     to: toAddress,
                     subject: `${fullEmail.subject}`,
                     body: generatedReply,
-                    emailId: fullEmail.id
+                    emailId: fullEmail.id,
+                    originalEmail: {
+                      to: fullEmail.from || 'Ismeretlen feladó',
+                      subject: fullEmail.subject,
+                      body: fullEmail.body
+                    }
                   });
                   console.log('SMTP auto-reply sendReply result:', replyResult);
                 } else if (authState.provider === 'gmail') {
@@ -528,7 +533,12 @@ function startEmailMonitoring() {
                     to: fullEmail.from,
                     subject: `${fullEmail.subject}`,
                     body: generatedReply,
-                    emailId: fullEmail.id
+                    emailId: fullEmail.id,
+                    originalEmail: {
+                      to: fullEmail.from || 'Ismeretlen feladó',
+                      subject: fullEmail.subject,
+                      body: fullEmail.body
+                    }
                   });
                   console.log('GMAIL auto-reply sendReply result:', replyResult);
                 }
@@ -970,7 +980,7 @@ async function generateReply(email) {
   }
 }
 
-async function sendReply({ to, subject, body, emailId }) {
+async function sendReply({ to, subject, body, emailId, originalEmail }) {
   try {
     console.log(`[sendReply] Küldés megkezdése: to=${to}, subject=${subject}, emailId=${emailId}`);
 
@@ -982,6 +992,14 @@ async function sendReply({ to, subject, body, emailId }) {
     let imageCid = 'signature';
     let watermarkCid = 'watermark';
     let htmlBody = body.replace(/\n/g, '<br>');
+
+    // Add original email details
+    if (originalEmail) {
+      htmlBody += `<br><br>--- Eredeti üzenet ---`;
+      htmlBody += `<br><br><strong>Feladó:</strong> ${originalEmail.to}`;
+      htmlBody += `<br><strong>Tárgy:</strong> ${originalEmail.subject}`;
+      htmlBody += `<br><br><strong>Üzenet:</strong><br>${originalEmail.body.replace(/\n/g, '<br>')}`;
+    }
 
     // Add signature text
     if (signatureText) htmlBody += `<br><br>${signatureText}`;
@@ -1574,9 +1592,11 @@ ipcMain.handle('get-replied-email-ids', async () => {
 ipcMain.handle('get-reply-stats', async () => {
   try {
     const sentLog = readSentEmailsLog();
+    console.log('[get-reply-stats] Sent log:', sentLog);
     if (!sentLog || sentLog.length === 0) return [];
     // Csak az utolsó 100 rekordot nézzük teljesítmény miatt
     const recent = sentLog.slice(-100);
+    console.log('[get-reply-stats] Recent log:', recent);
     // Aggregálás nap szerint (utolsó 5 nap)
     const counts = {};
     const now = new Date();
@@ -1597,8 +1617,10 @@ ipcMain.handle('get-reply-stats', async () => {
     const sorted = Object.entries(counts)
       .map(([date, count]) => ({ date, count }))
       .sort((a, b) => new Date(a.date.split('.').reverse().join('-')) - new Date(b.date.split('.').reverse().join('-')));
+    console.log('[get-reply-stats] Aggregated stats:', sorted);
     return sorted;
   } catch (e) {
+    console.error('[get-reply-stats] Error:', e);
     return [];
   }
 });
@@ -1829,4 +1851,17 @@ ipcMain.on('log', (event, message) => {
   console.log(`[Renderer Log]: ${message}`);
   logToFile(`[Renderer Log]: ${message}`);
 });
+
+function readSentEmailsLog() {
+  try {
+    const sentPath = findFile('sentEmailsLog.json');
+    if (fs.existsSync(sentPath)) {
+      return JSON.parse(fs.readFileSync(sentPath, 'utf-8'));
+    }
+    return [];
+  } catch (err) {
+    console.error('[readSentEmailsLog] Error reading sentEmailsLog.json:', err);
+    return [];
+  }
+}
 
