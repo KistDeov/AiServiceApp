@@ -1865,3 +1865,28 @@ function readSentEmailsLog() {
   }
 }
 
+// IPC handler to check licence activation
+ipcMain.handle('is-licence-activated', async (event, payload) => {
+    // Logic to check the database for the licenceActivated field
+    const { email, licenceKey } = payload;
+    try {
+        const dbUrl = process.env.DATABASE_URL; // Az adatbázis URL-t az .env fájlból olvassuk
+        if (!dbUrl) {
+          throw new Error('DATABASE_URL környezeti változó nincs beállítva!');
+        }
+
+        const connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
+        const [rows] = await connection.execute(
+          'SELECT * FROM user WHERE email = ? AND licence = ?',
+          [email, licenceKey]
+        );
+
+        const licenceData = rows.length > 0 ? rows[0] : null;
+        await connection.end();
+        return licenceData && licenceData.licenceActivated === 1;
+    } catch (error) {
+        console.error('Error checking licence activation:', error);
+        return false;
+    }
+});
+

@@ -36,13 +36,19 @@ const LicenceActivationView = ({}) => {
             // IPC call to backend
             const res = await window.api.checkLicence(payload);
             if (res.success) {
-                // Successful license: set license state via IPC
-                await window.api.setEmail(email.trim());
-                // Az email továbbítása az új IPC handlernek
-                await window.api.setActivationEmail(email.trim());
-                localStorage.setItem('isLicenced', 'true');
-                localStorage.setItem('licence', normalisedLicence);
-                window.location.reload(); // or navigate to the main app
+                // Check the database field for licence activation
+                const isActivated = await window.api.isLicenceActivated(payload);
+                if (isActivated) {
+                    setError("A licenc már aktiválva van az adatbázisban.");
+                } else {
+                    // Successful license: set license state via IPC
+                    await window.api.setEmail(email.trim());
+                    // Az email továbbítása az új IPC handlernek
+                    await window.api.setActivationEmail(email.trim());
+                    localStorage.setItem('isLicenced', 'true');
+                    localStorage.setItem('licence', normalisedLicence);
+                    window.location.reload(); // or navigate to the main app
+                }
             } else {
                 setError(res.error || "Invalid license or email.");
             }

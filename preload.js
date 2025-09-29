@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   openExternal: (url) => ipcRenderer.send('open-external', url),
   //Adatbázis műveletek
   checkLicence: (payload) => ipcRenderer.invoke('check-licence', payload),
+  isLicenceActivated: (payload) => ipcRenderer.invoke('is-licence-activated', payload),
   // Authentikációs funkciók
   checkAuthStatus: () => ipcRenderer.invoke('check-auth-status'),
   loginWithGmail: () => ipcRenderer.invoke('login-with-gmail'),

@@ -44,7 +44,6 @@ import DemoOverView from './components/DemoOverView';
 import HelpView from './components/HelpView';
 import NoConnectionView from './components/NoConnectionView.jsx';
 import UpdateView from "./components/UpdateView.jsx";
-import UpdateAvailableView from "./components/UpdateAvailableView.jsx";
 import UpdateReadyView from "./components/UpdateReadyView.jsx";
 import LicenceActivationView from './components/LicenceActivationView.jsx';
 import { FaRegQuestionCircle, FaBars, FaThumbtack, FaHome, FaEnvelope, FaDatabase, FaRobot, FaCog, FaSignOutAlt, FaPowerOff, FaUserFriends } from 'react-icons/fa';
@@ -680,19 +679,6 @@ const App = () => {
     window.api.setTimedAutoSend && window.api.setTimedAutoSend(event.target.checked);
   };
 
-  // Frissítési folyamat kezelése
-  useEffect(() => {
-    const handleUpdateProgress = (_, progress) => {
-      setUpdateProgress(progress);
-    };
-
-    window.api.onUpdateDownloadProgress(handleUpdateProgress);
-
-    return () => {
-      window.api.removeUpdateDownloadProgressListener(handleUpdateProgress);
-    };
-  }, []);
-
   useEffect(() => {
     const handleUpdateStatus = (_, status) => {
       setUpdateStatus(status);
@@ -716,8 +702,7 @@ const App = () => {
 
   const renderView = () => {
     switch (activeView) {
-      case 'update': return <UpdateView />;
-      case 'updateAvailable': return <UpdateAvailableView onClose={() => { setActiveView(''); setUpdateStatus(''); }} />;
+      case 'updateAvailable': return <UpdateView />;
       case 'updateReady': return <UpdateReadyView onClose={() => { setActiveView(''); setUpdateStatus(''); }} />;
       case 'mails': return <MailsView showSnackbar={showSnackbar} />;
       case 'sentMails': return <SentMailsView showSnackbar={showSnackbar} />;
@@ -869,25 +854,15 @@ const App = () => {
     );
   }
 
-  if (updateProgress !== null) {
-    return (
-      <ThemeProvider theme={themes[themeName] || themes.black}>
-        <CssBaseline />
-        <UpdateView />
-      </ThemeProvider>
-    );
-  }
-
   if (updateStatus === 'available') {
     return (
       <ThemeProvider theme={themes[themeName] || themes.black}>
         <CssBaseline />
-        <UpdateAvailableView onClose={() => {setActiveView(''), setUpdateStatus('')}} />
+        <UpdateView/>
       </ThemeProvider>
     );
   }
   if (updateStatus === 'ready') {
-    setUpdateProgress(null);
     return (
       <ThemeProvider theme={themes[themeName] || themes.black}>
         <CssBaseline />

@@ -1,10 +1,9 @@
 Fontos:
     - Frissítési rendszer még nem az igazi
-Ráér:  
-    - Ellenőrizze az aktív licenszt 
-    - Saját nsis telepítő kliens
-    - Új frontend dizájn/átgondolás (Minden oldal egyesével végignézni, új ikon szín fekete-sárga)
     - .env nem biztonságos
+    - Új frontend dizájn/átgondolás (Minden oldal egyesével végignézni, új ikon szín fekete-sárga)
+    - Saját nsis telepítő kliens
+Ráér:  
     - Login felvillan hiába vagyok bejelentkezve
     - Be lehessen állítani, hogy melyik email-címekre válaszoljon 
     - Lehessen több emailel bejelentkezni, úgymint a thunderbirdnél (Fiókok aloldal)
