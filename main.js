@@ -1474,7 +1474,7 @@ app.whenReady().then(async () => {
   autoUpdater.on('update-available', () => {
     console.log('Frissítés elérhető!');
     if (mainWindow) {
-        mainWindow.webContents.send('update-status', 'available');
+        mainWindow.webContents.send('update-ava');
     }
   });
   
@@ -1488,7 +1488,7 @@ app.whenReady().then(async () => {
   autoUpdater.on('update-downloaded', () => {
     console.log('Frissítés letöltve!');
     if (mainWindow) {
-      mainWindow.webContents.send('update-status', 'ready');
+      mainWindow.webContents.send('update-ready');
     }
   });
 
@@ -1883,7 +1883,7 @@ ipcMain.handle('is-licence-activated', async (event, payload) => {
 
         const connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
         const [rows] = await connection.execute(
-          'SELECT * FROM user WHERE email = ? AND licence = ? AND licenceActivated = 0',
+          'SELECT * FROM user WHERE email = ? AND licence = ? AND licenceActivated = 1',
           [email, licenceKey]
         );
 
@@ -1895,3 +1895,12 @@ ipcMain.handle('is-licence-activated', async (event, payload) => {
     }
 });
 
+ipcMain.handle('set-view', async (event, view) => {
+  if (!mainWindow) {
+    console.error('mainWindow is not initialized');
+    return false;
+  }
+
+  mainWindow.webContents.send('set-view', view);
+  return true;
+});

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Paper, CircularProgress } from '@mui/material';
+import { Box, Typography, Paper, CircularProgress, IconButton } from '@mui/material';
+import { FaArrowCircleRight } from "react-icons/fa";
 import ReplyStatsChart from './ReplyStatsChart';
 
 const HomeView = ({ showSnackbar, reloadKey }) => {
@@ -8,6 +9,10 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
   const [userEmail, setUserEmail] = useState('');
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsData, setStatsData] = useState([]);
+
+  const handleViewChange = (view) => {
+    window.api.setView(view);
+  }
 
   useEffect(() => {
     window.api.onEmailsUpdated((newEmails) => {
@@ -19,7 +24,7 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
     ])
       .then(([emails, email]) => {
         setUnreadEmails(emails);
-        setUserEmail(email);
+        setUserEmail(email.split('@')[0]);
         setLoading(false);
       })
       .catch(err => {
@@ -60,24 +65,32 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
   }
 
   return (
-    <Paper sx={{ p: 4 }}>
-      <Typography variant="h4" gutterBottom>Főoldal</Typography>
-      <Typography variant="body1" gutterBottom>
-        Bejelentkezve mint: {userEmail}
+    <Paper sx={{ p: 4, maxHeight: 675 }}>
+      <Typography variant="h4" gutterBottom>
+        Üdvözlöm, {userEmail}!
       </Typography>
-      <Typography variant="body1">
+      <Typography variant="body1" sx={{ mt: 4 }}>
         {unreadEmails.length > 0 
-          ? `Önnek ${unreadEmails.length} db válaszolatlan levele van.`
+          ? `${unreadEmails.length} db válaszolatlan leveled van.`
           : 'Nincs válaszra váró levél'}
+        <IconButton onClick={() => handleViewChange('mails')} size="large" sx={{ ml: 1, color: 'primary.main' }}>
+            <FaArrowCircleRight />
+        </IconButton>
       </Typography>
       {statsLoading ? (
         <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
           <CircularProgress />
         </Box>
       ) : (
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mt: 2, mb: 1 }}>
-          <ReplyStatsChart data={statsData} width={300} height={100} />
-        </Box>
+        <><Typography variant="body1" gutterBottom sx={{ mt: 4 }}>
+            0 db válasz előkészítve a küldésre
+
+          <IconButton onClick={() => handleViewChange('generatedMails')} size="large" sx={{ ml: 1, color: 'primary.main' }}>
+            <FaArrowCircleRight />
+          </IconButton>
+          </Typography><Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mt: 4, mb: 1 }}>
+              <ReplyStatsChart data={statsData} width={300} height={100} />
+            </Box></>
       )}
     </Paper>
   );

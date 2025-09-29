@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('api', {
       return Promise.resolve(false);
     }
   },
+  setView: (view) => ipcRenderer.invoke('set-view', view),
   checkInternet: () => ipcRenderer.invoke('check-internet'),
   getMinEmailDate: () => ipcRenderer.invoke('getMinEmailDate'),
   setMinEmailDate: (dateStr) => ipcRenderer.invoke('setMinEmailDate', dateStr),
@@ -93,10 +94,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.removeListener('update-download-progress', callback);
   },
   onUpdateAvailable: (callback) => {
-    ipcRenderer.on('update-status', (_, status) => callback(status));
+    ipcRenderer.on('update-ava', () => callback());
   },
-  onUpdateReady: (callback) => { 
-    ipcRenderer.on('update-status', (_, status) => callback(status));
+  onUpdateReady: (callback) => {
+    ipcRenderer.on('update-ready', () => callback());
   },
   handleUpdateAction: (action) => {
     ipcRenderer.invoke('handle-update-action', action);

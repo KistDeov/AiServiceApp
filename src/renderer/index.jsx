@@ -1,6 +1,6 @@
 window.global ||= window;
 
-import React, { useEffect, useState } from "react";
+import React, { use, useEffect, useState } from "react";
 import ReactDOM from 'react-dom/client';
 import {
   Box,
@@ -46,8 +46,10 @@ import NoConnectionView from './components/NoConnectionView.jsx';
 import UpdateView from "./components/UpdateView.jsx";
 import UpdateReadyView from "./components/UpdateReadyView.jsx";
 import LicenceActivationView from './components/LicenceActivationView.jsx';
+import GeneratedMailsView from "./components/GeneratedMailsView.jsx";
 import { FaRegQuestionCircle, FaBars, FaThumbtack, FaHome, FaEnvelope, FaDatabase, FaRobot, FaCog, FaSignOutAlt, FaPowerOff, FaUserFriends } from 'react-icons/fa';
 import { FaEnvelopeCircleCheck } from "react-icons/fa6";
+import { BsFillEnvelopeArrowUpFill } from "react-icons/bs";
 import { IoMdConstruct } from "react-icons/io";
 import { GoDotFill } from "react-icons/go";
 import { FaTimesCircle } from "react-icons/fa";
@@ -680,23 +682,36 @@ const App = () => {
   };
 
   useEffect(() => {
-    const handleUpdateStatus = (_, status) => {
-      setUpdateStatus(status);
-      if (status === 'available') {
-        console.log('Update available!');
-        setActiveView('updateAvailable');
-      } else if (status === 'ready') {
-        console.log('Update ready!');
-        setActiveView('updateReady');
-      }
+    const handleUpdateAvailable = () => {
+      console.log('Update available!');
+      setUpdateStatus('available');
+      setActiveView('updateAvailable');
     };
 
-    window.api.onUpdateAvailable(() => handleUpdateStatus(null, 'available'));
-    window.api.onUpdateReady(() => handleUpdateStatus(null, 'ready'));
+    const handleUpdateReady = () => {
+      console.log('Update ready!');
+      setUpdateStatus('ready');
+      setActiveView('updateReady');
+    };
+
+    window.api.onUpdateAvailable(handleUpdateAvailable);
+    window.api.onUpdateReady(handleUpdateReady);
 
     return () => {
-      window.api.onUpdateAvailable(null);
-      window.api.onUpdateReady(null);
+      window.api.removeUpdateDownloadProgressListener(handleUpdateAvailable);
+      window.api.removeUpdateDownloadProgressListener(handleUpdateReady);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleSetView = (view) => {
+      setActiveView(view);
+    };
+
+    window.api.receive('set-view', handleSetView);
+
+    return () => {
+      window.api.remove('set-view', handleSetView);
     };
   }, []);
 
@@ -704,6 +719,7 @@ const App = () => {
     switch (activeView) {
       case 'updateAvailable': return <UpdateView />;
       case 'updateReady': return <UpdateReadyView onClose={() => { setActiveView(''); setUpdateStatus(''); }} />;
+      case 'generatedMails': return <GeneratedMailsView />;
       case 'mails': return <MailsView showSnackbar={showSnackbar} />;
       case 'sentMails': return <SentMailsView showSnackbar={showSnackbar} />;
       case 'mailStructure': return <MailStructureView showSnackbar={showSnackbar} />;
@@ -902,6 +918,9 @@ const App = () => {
           <IconButton onClick={() => setActiveView('sentMails')} color={activeView === 'sentMails' ? 'default' : 'inherit'} sx={{ color: 'text.primary' }}>
             <FaEnvelopeCircleCheck size={27} />
           </IconButton>
+          <IconButton onClick={() => setActiveView('generatedMails')} color={activeView === 'generatedMails' ? 'default' : 'inherit'} sx={{ color: 'text.primary' }}>
+            <BsFillEnvelopeArrowUpFill size={22} />
+          </IconButton>
           <IconButton onClick={() => setActiveView('mailStructure')} color={activeView === 'mailStructure' ? 'default' : 'inherit'} sx={{ color: 'text.primary' }}>
             <IoMdConstruct size={22} />
           </IconButton>
@@ -1042,7 +1061,7 @@ const App = () => {
               onMouseLeave={handleDrawerMouseLeave}
             >
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', p: 1 }}>
-                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.24</Typography>
+                <Typography variant='caption' sx={{ mr: 5.5 }}>Verzió: Demo 1.23</Typography>
                 <IconButton onClick={handlePinClick} size="small" color={isPinned ? 'error' : 'default'}>
                   {isPinned ? (
                     <FaTimesCircle size={20} color="#d32f2f" />
@@ -1066,6 +1085,11 @@ const App = () => {
                   <ListItem disablePadding>
                     <ListItemButton selected={activeView === 'sentMails'} onClick={() => setActiveView('sentMails')}>
                       <ListItemText primary="Elküldött levelek" />
+                    </ListItemButton>
+                  </ListItem>
+                  <ListItem disablePadding>
+                    <ListItemButton selected={activeView === 'generatedMails'} onClick={() => setActiveView('generatedMails')}>
+                      <ListItemText primary="Előkészített levelek" />
                     </ListItemButton>
                   </ListItem>
                   <ListItem disablePadding>

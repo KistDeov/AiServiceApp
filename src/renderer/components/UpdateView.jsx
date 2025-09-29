@@ -15,13 +15,13 @@ const UpdateView = () => {
         mt: 16,
       }}
     >
-      <CircularProgress size={60} sx={{ mb: 3 }} />
       <Typography variant="h5" gutterBottom>
         Frissítések letöltése folyamatban...
       </Typography>
       <Typography variant="body1">
         Ez eltarthat néhány másodpercig. Kérjük, NE zárd be az alkalmazást!
       </Typography>
+      <CircularProgress size={60} sx={{ mb: 3 }} />
     </Box>
   );
 };

@@ -90,7 +90,7 @@ const ReplyStatsChart = ({ data }) => {
         minHeight: 350,
       }}>
         <Typography variant="h4" gutterBottom sx={{ fontSize: 16, textAlign: 'center', mb: 1, mt: 1, color: theme.palette.text.primary }}>
-          AI által megválaszolt levelek naponta
+          AI által megválaszolt levelek az elmúlt 5 napban
         </Typography>
         <Box sx={{ width: '100%', height: 300 }}>
           <Bar data={chartData} options={{
