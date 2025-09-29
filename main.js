@@ -247,6 +247,7 @@ ipcMain.handle('getApiKey', async () => {
 // Add to settings defaults
 const defaultSettings = {
   autoSend: false,
+  halfAuto: false,
   autoSendStartTime: "08:00",
   autoSendEndTime: "16:00",
   displayMode: "windowed",
@@ -282,10 +283,16 @@ function saveSettings(settings) {
 
 let settings = readSettings();
 let autoSend = settings.autoSend || false;
+let halfAutoSend = settings.halfAuto || false;
 
 ipcMain.handle("getAutoSend", async () => {
   return autoSend;
 });
+
+ipcMain.handle("getHalfAutoSend", async () => {
+  return halfAutoSend;
+});
+
 
 let emailMonitoringInterval = null;
 let internetMonitorInterval = null;
@@ -643,6 +650,14 @@ ipcMain.handle("setAutoSend", async (event, value) => {
   // Always start monitoring (it will just skip auto-reply if autoSend is false)
   startEmailMonitoring();
 });
+ipcMain.handle("setHalfAutoSend", async (event, value) => {
+  halfAutoSend = value;
+  settings.halfAuto = value;
+  saveSettings(settings);
+  // Always start monitoring (it will just skip auto-reply if halfAuto is false)
+  startEmailMonitoring();
+});
+
 
 ipcMain.handle("setAutoSendTimes", async (event, { startTime, endTime }) => {
   settings.autoSendStartTime = startTime;

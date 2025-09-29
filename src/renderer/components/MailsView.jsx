@@ -207,7 +207,7 @@ const MailsView = ({ showSnackbar }) => {
     }}>
       <Typography variant="h4" gutterBottom>Beérkezett levelek</Typography>
       <TextField
-        label="Keresés a levelekben"
+        label="Keresés a beérkezett levelekben"
         variant="outlined"
         fullWidth
         sx={{ mb: 2 }}

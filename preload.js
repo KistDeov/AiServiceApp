@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('api', {
   sendReply: (data) => ipcRenderer.invoke('send-reply', data),
   getAutoSend: () => ipcRenderer.invoke('getAutoSend'),
   setAutoSend: (value) => ipcRenderer.invoke('setAutoSend', value),
+  getHalfAutoSend: () => ipcRenderer.invoke('getHalfAutoSend'),
+  setHalfAuto: (value) => ipcRenderer.invoke('setHalfAutoSend', value),
   onEmailsUpdated: (callback) => ipcRenderer.on('emails-updated', (_, data) => callback(data)),
   removeEmailsUpdateListener: () => ipcRenderer.removeAllListeners('emails-updated'),
   uploadExcelFile: (content) => ipcRenderer.invoke('upload-excel-file', content),

@@ -1,5 +1,6 @@
 {
   "autoSend": true,
+  "halfAuto": true,
   "autoSendStartTime": "00:00",
   "autoSendEndTime": "23:59",
   "displayMode": "windowed",
@@ -13,5 +14,6 @@
   "maxEmailDate": "",
   "notifyOnAutoReply": false,
   "notificationEmail": "",
-  "webUrls": []
+  "webUrls": [],
+  "halfAutoSend": true
 }

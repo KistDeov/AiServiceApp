@@ -19,6 +19,42 @@ import {
 } from '@mui/material';
 import { ml } from 'googleapis/build/src/apis/ml';
 
+const HalfAutoSendConfirmDialog = ({ open, onClose, onConfirm }) => {
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      aria-labelledby="alert-dialog-title"
+      aria-describedby="alert-dialog-description"
+      PaperProps={{
+        sx: {
+          backgroundColor: 'background.paper',
+          color: 'text.primary'
+        }
+      }}
+    >
+      <DialogTitle id="alert-dialog-title" sx={{ color: 'text.primary', backgroundColor: 'background.paper' }}>
+        Félautomata válaszküldés bekapcsolása
+      </DialogTitle>
+      <DialogContent sx={{ backgroundColor: 'background.paper' }}>
+        <DialogContentText id="alert-dialog-description" sx={{ color: 'text.secondary', backgroundColor: 'background.paper' }}>
+          Biztosan be szeretné kapcsolni a félautomata válaszküldést? 
+          A rendszer beérkező levél esetén generál egy választ a levélre majd előkészíti azt az elküldéshez. 
+          Ezeket a leveleket a "Előkészített levelek" nézetben tudod megtekinteni és szükség esetén módosítani, majd elküldeni.
+        </DialogContentText>
+      </DialogContent>
+      <DialogActions sx={{ backgroundColor: 'background.paper' }}>
+        <Button onClick={onClose} color="primary">
+          Mégsem
+        </Button>
+        <Button onClick={onConfirm} color="primary" variant="contained" autoFocus>
+          Bekapcsolás
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
 const AutoSendConfirmDialog = ({ open, onClose, onConfirm, startTime, endTime, onTimeChange, timedAutoSend, onTimedAutoSendChange }) => {
   return (
     <Dialog
@@ -109,14 +145,17 @@ const themeOptions = [
   { value: 'blue', label: 'Kék' },
 ];
 
-const SettingsView = ({ themeName, setThemeName, onAutoSendChanged }) => {
+const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSendChanged }) => {
   const [autoSend, setAutoSend] = useState(false);
   const [startTime, setStartTime] = useState("08:00");
   const [endTime, setEndTime] = useState("16:00");
   const [timedAutoSend, setTimedAutoSend] = useState(true);
   const [loading, setLoading] = useState(true);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [showHalfAutoConfirmDialog, setShowHalfAutoConfirmDialog] = useState(false);
   const [pendingAutoSend, setPendingAutoSend] = useState(false);
+  const [pendingHalfAuto, setPendingHalfAuto] = useState(false);
+  const [halfAuto, setHalfAuto] = useState(false);
   const [displayMode, setDisplayMode] = useState('windowed');
   const [ignoredEmails, setIgnoredEmails] = useState("");
   const [minEmailDate, setMinEmailDate] = useState(""); // ÚJ
@@ -128,6 +167,7 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged }) => {
   useEffect(() => {
     Promise.all([
       window.api.getAutoSend(),
+      window.api.getHalfAutoSend(),
       window.api.getAutoSendTimes(),
       window.api.getDisplayMode(),
       window.api.getTimedAutoSend ? window.api.getTimedAutoSend() : Promise.resolve(true),
@@ -136,8 +176,9 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged }) => {
       window.api.getMaxEmailDate ? window.api.getMaxEmailDate() : Promise.resolve(""),
       window.api.getNotifyOnAutoReply(),
       window.api.getNotificationEmail()
-    ]).then(([autoSendVal, times, mode, timed, ignored, minDate, maxDate, notify, email]) => {
+    ]).then(([autoSendVal, halfAutoVal, times, mode, timed, ignored, minDate, maxDate, notify, email]) => {
       setAutoSend(autoSendVal);
+      setHalfAuto(halfAutoVal);
       setStartTime(times.startTime);
       setEndTime(times.endTime);
       setDisplayMode(mode || 'windowed');
@@ -149,6 +190,7 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged }) => {
       setNotificationEmail(email || "");
       setLoading(false);
       window.global.autoSend = autoSendVal;
+      window.global.halfAuto = halfAutoVal;
     });
   }, []);
 
@@ -204,6 +246,38 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged }) => {
   const handleCancelAutoSend = () => {
     setShowConfirmDialog(false);
     setPendingAutoSend(false);
+  };
+
+  const handleHalfAutoSendChange = (event) => {
+    const newValue = event.target.checked;
+    if (newValue) {
+      setPendingHalfAuto(true);
+      setShowHalfAutoConfirmDialog(true);
+    } else {
+      setHalfAuto(false);
+      window.api.setHalfAuto(false).then(() => {
+        window.global.halfAuto = false;
+        if (onHalfAutoSendChanged) onHalfAutoSendChanged(false); // <-- EZ ITT A LÉNYEG
+        window.api.onHalfAutoSendChanged && window.api.onHalfAutoSendChanged(false);
+      });
+    }
+  };
+
+  const handleConfirmHalfAutoSend = () => {
+    setHalfAuto(true);
+    window.api.setHalfAuto(true).then(() => {
+      window.global.halfAuto = true;
+      if (onHalfAutoSendChanged) onHalfAutoSendChanged(true); // <-- EZ ITT A LÉNYEG
+      window.api.onHalfAutoSendChanged && window.api.onHalfAutoSendChanged(true);
+    });
+
+    setShowHalfAutoConfirmDialog(false);
+    setPendingHalfAuto(false);
+  };
+
+  const handleCancelHalfAutoSend = () => {
+    setShowHalfAutoConfirmDialog(false);
+    setPendingHalfAuto(false);
   };
 
   const handleTimeChange = (type) => (event) => {
@@ -287,6 +361,18 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged }) => {
               }
               label="Automatikus válaszküldés"
             />
+            <FormControlLabel
+              control={
+                <Switch
+                  sx={{ ml: 1 }}
+                  checked={halfAuto || pendingHalfAuto}
+                  onChange={handleHalfAutoSendChange}
+                />
+              }
+              label="Félautomata válaszküldés"
+            />
+          
+
             
             <Box sx={{ mt: 4 }}>
               <Typography variant="h6" gutterBottom>
@@ -411,6 +497,13 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged }) => {
         timedAutoSend={timedAutoSend}
         onTimedAutoSendChange={handleTimedAutoSendChange}
       />
+
+      <HalfAutoSendConfirmDialog
+        open={showHalfAutoConfirmDialog}
+        onClose={handleCancelHalfAutoSend}
+        onConfirm={handleConfirmHalfAutoSend}
+      />
+
     </>
   );
 };

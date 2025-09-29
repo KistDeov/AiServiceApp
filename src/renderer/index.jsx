@@ -471,6 +471,7 @@ const App = () => {
   const [drawerOpen, setDrawerOpen] = useState(true); // alapból true
   const [isOnline, setIsOnline] = useState(true); // ÚJ: internet állapot
   const [autoSend, setAutoSend] = useState(false);
+  const [halfAuto, setHalfAuto] = useState(false); 
   const [isLicenced, setIsLicenced] = useState(() => {
     return localStorage.getItem('isLicenced') === 'true';
   }); // ÚJ: licenc állapot
@@ -628,6 +629,24 @@ const App = () => {
     };
   }, []);
 
+  useEffect(() => {
+  let unsub = null;
+  // Első lekérdezés
+  window.api.getHalfAutoSend?.().then(val => setHalfAuto(!!val));
+  // Dinamikus frissítés, ha van ilyen event
+  if (window.api.onHalfAutoSendChanged) {
+    const handler = (val) => setHalfAuto(!!val);
+    window.api.onHalfAutoSendChanged(handler);
+    unsub = () => window.api.onHalfAutoSendChanged(null);
+  } else if (window.api.subscribeHalfAutoSendChanged) {
+    // Alternatív API támogatás
+    unsub = window.api.subscribeHalfAutoSendChanged((val) => setHalfAuto(!!val));
+  }
+  return () => {
+    if (unsub) unsub();
+  };
+  }, []);
+
   const handleAutoSendSwitch = (event) => {
     const checked = event.target.checked;
     if (checked) {
@@ -723,7 +742,7 @@ const App = () => {
       case 'mails': return <MailsView showSnackbar={showSnackbar} />;
       case 'sentMails': return <SentMailsView showSnackbar={showSnackbar} />;
       case 'mailStructure': return <MailStructureView showSnackbar={showSnackbar} />;
-      case 'settings': return <SettingsView themeName={themeName} setThemeName={setThemeName} onAutoSendChanged={setAutoSend}/>;
+      case 'settings': return <SettingsView themeName={themeName} setThemeName={setThemeName} onAutoSendChanged={setAutoSend} onHalfAutoSendChanged={setHalfAuto} />;
       case 'import': return <ImportFileView showSnackbar={showSnackbar} />;
       case 'prompt': return <PromptView showSnackbar={showSnackbar} />;
       case 'help': return <HelpView showSnackbar={showSnackbar} />;
