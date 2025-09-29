@@ -1,6 +1,3 @@
-import dotenv from 'dotenv';
-import { findFile } from './src/utils/findFile.js';
-dotenv.config({ path: findFile('.env') });
 import { authorize } from './src/backend/auth.js';
 import { google } from 'googleapis';
 import { htmlToText } from 'html-to-text';
@@ -225,7 +222,10 @@ function extractBody(payload) {
 
   // Képek továbbítása az OpenAI Vision API-nak
   async function sendImageToOpenAI(base64Image, mimeType) {
-    const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = await getSecret('OpenAPIKey');
+  if (!apiKey) {
+    throw new Error('OpenAPIKey nincs beállítva Keytarban!');
+  }
     if (!apiKey) throw new Error('Nincs megadva OpenAI API kulcs!');
     try {
       const response = await axios.post(

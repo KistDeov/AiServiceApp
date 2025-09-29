@@ -1,6 +1,3 @@
-import dotenv from 'dotenv';
-import { findFile } from '../utils/findFile.js';
-dotenv.config({ path: findFile('.env') });
 import nodemailer from 'nodemailer';
 import Imap from 'imap';
 import { simpleParser } from 'mailparser';

@@ -1,6 +1,4 @@
-import dotenv from 'dotenv';
 import { findFile } from '../utils/findFile.js';
-dotenv.config({ path: findFile('.env') });
 import fs from 'fs/promises';
 import { google } from 'googleapis';
 import path from 'path';

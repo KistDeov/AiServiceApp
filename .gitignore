@@ -99,3 +99,5 @@ settings.json
 repliedEmails.json
 sentEmails.json
 ToDo.txt
+setSecrets.js
+keytarHelper.js

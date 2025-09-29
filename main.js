@@ -1,13 +1,10 @@
-import dotenv from 'dotenv';
 import { findFile } from './src/utils/findFile.js';
-dotenv.config({ path: findFile('.env') });
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { app, BrowserWindow, ipcMain, dialog, shell, webContents} from 'electron';
 import { getUnreadEmails, getEmailById } from './gmail.js';
 import { OpenAI } from 'openai';
 import XLSX from 'xlsx';
-import 'dotenv/config';
 import { authorize } from './src/backend/auth.js';
 import { google } from 'googleapis';
 import fs from 'fs';
@@ -17,6 +14,7 @@ import dns from 'dns';
 import mysql from 'mysql2/promise'; 
 import updaterPkg from "electron-updater";
 const { autoUpdater } = updaterPkg;
+import { getSecret } from './src/utils/keytarHelper.js'; 
 
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
@@ -96,8 +94,13 @@ function saveConfig(config) {
 
 let config = readConfig();
 
+const openKey = await getSecret('OpenAPIKey');
+if (!openKey) {
+  throw new Error('OpenAPIKey nincs beállítva Keytarban!');
+}
+
 const openai = new OpenAI({
-  apiKey: config.OPENAI_API_KEY || process.env.OPENAI_API_KEY,
+  apiKey: openKey
 });
 
 // Attachment upload handler (max 25MB, attachments folder)
@@ -186,9 +189,9 @@ ipcMain.handle('get-licence-from-localstorage', async (event, licence) => {
 
 async function setTrialEndedForLicence(licence) {
   try {
-    const dbUrl = process.env.DATABASE_URL; // Az adatbázis URL-t az .env fájlból olvassuk
+    const dbUrl = await getSecret('DATABASE_URL'); // Az adatbázis URL-t Keytarból olvassuk
     if (!dbUrl) {
-      throw new Error('DATABASE_URL környezeti változó nincs beállítva!');
+      throw new Error('DATABASE_URL nincs beállítva Keytarban!');
     }
 
     const connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
@@ -234,7 +237,11 @@ ipcMain.handle('setApiKey', async (event, apiKey) => {
 });
 
 ipcMain.handle('getApiKey', async () => {
-  return config.OPENAI_API_KEY || process.env.OPENAI_API_KEY || '';
+  const apiKey = await getSecret('OpenAPIKey');
+  if (!apiKey) {
+    throw new Error('OpenAPI kulcs nincs beállítva Keytarban!');
+  }
+  return apiKey;
 });
 
 // Add to settings defaults
@@ -1285,10 +1292,10 @@ ipcMain.handle('login-with-gmail', async () => {
     startEmailMonitoring();
     // Save the authenticated email to the database
     
-    const dbUrl = process.env.DATABASE_URL; // Az adatbázis URL-t az .env fájlból olvassuk
-    if (!dbUrl) {
-      throw new Error('DATABASE_URL környezeti változó nincs beállítva!');
-    }
+      const dbUrl = await getSecret('DATABASE_URL');
+      if (!dbUrl) {
+        throw new Error('DATABASE_URL nincs beállítva Keytarban!');
+      }
 
     const emailInUse = activationEmail || null;
     const connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
@@ -1360,10 +1367,10 @@ ipcMain.handle('login-with-smtp', async (event, config) => {
         }
       };
 
-      const dbUrl = process.env.DATABASE_URL; // Az adatbázis URL-t az .env fájlból olvassuk
-      if (!dbUrl) {
-        throw new Error('DATABASE_URL környezeti változó nincs beállítva!');
-      }
+        const dbUrl = await getSecret('DATABASE_URL');
+        if (!dbUrl) {
+          throw new Error('DATABASE_URL nincs beállítva Keytarban!');
+        }
 
       const emailInUse = activationEmail || null;
       const connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
@@ -1656,9 +1663,9 @@ async function describeImagesWithAI(images) {
 
 ipcMain.handle('check-licence', async (event, { email, licenceKey }) => {
   try {
-    const dbUrl = process.env.DATABASE_URL; // Az adatbázis URL-t az .env fájlból olvassuk
+    const dbUrl = await getSecret('DATABASE_URL');
     if (!dbUrl) {
-      throw new Error('DATABASE_URL környezeti változó nincs beállítva!');
+      throw new Error('DATABASE_URL nincs beállítva Keytarban!');
     }
 
     const connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
@@ -1867,23 +1874,21 @@ function readSentEmailsLog() {
 
 // IPC handler to check licence activation
 ipcMain.handle('is-licence-activated', async (event, payload) => {
-    // Logic to check the database for the licenceActivated field
     const { email, licenceKey } = payload;
     try {
-        const dbUrl = process.env.DATABASE_URL; // Az adatbázis URL-t az .env fájlból olvassuk
+        const dbUrl = await getSecret('DATABASE_URL');
         if (!dbUrl) {
-          throw new Error('DATABASE_URL környezeti változó nincs beállítva!');
+          throw new Error('DATABASE_URL nincs beállítva Keytarban!');
         }
 
         const connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
         const [rows] = await connection.execute(
-          'SELECT * FROM user WHERE email = ? AND licence = ?',
+          'SELECT * FROM user WHERE email = ? AND licence = ? AND licenceActivated = 0',
           [email, licenceKey]
         );
 
-        const licenceData = rows.length > 0 ? rows[0] : null;
         await connection.end();
-        return licenceData && licenceData.licenceActivated === 1;
+        return rows.length > 0;
     } catch (error) {
         console.error('Error checking licence activation:', error);
         return false;

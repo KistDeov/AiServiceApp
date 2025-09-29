@@ -1,6 +1,6 @@
 {
   "name": "aimail",
-  "version": "1.0.23",
+  "version": "1.0.24",
   "description": "An aplication that uses AI to answer mails",
   "main": "main.js",
   "type": "module",
@@ -111,6 +111,7 @@
     "googleapis": "^149.0.0",
     "html-to-text": "^9.0.5",
     "imap": "^0.8.19",
+    "keytar": "^7.9.0",
     "mailparser": "^3.7.3",
     "markdown-to-jsx": "^7.7.13",
     "mysql2": "^3.14.5",
