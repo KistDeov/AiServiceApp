@@ -1,5 +1,12 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+// In ESM the Node globals __filename and __dirname are not defined.
+// Compute them from import.meta.url so this module works when
+// the project/package.json uses "type": "module" (or in an asar bundle).
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export function findFile(filename) {
   const tried = [];
