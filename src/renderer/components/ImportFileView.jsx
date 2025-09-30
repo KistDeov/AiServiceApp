@@ -4,6 +4,9 @@ import { MdDelete } from 'react-icons/md';
 
 const ImportFileView = ({ showSnackbar }) => {
   const [selectedFileName, setSelectedFileName] = useState(null);
+  const [uploadedFilePath, setUploadedFilePath] = useState(null);
+  const [uploadedFileName, setUploadedFileName] = useState(null);
+  const [originalUploadedFileName, setOriginalUploadedFileName] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [pendingFileData, setPendingFileData] = useState(null);
@@ -13,13 +16,46 @@ const ImportFileView = ({ showSnackbar }) => {
   const [urlError, setUrlError] = useState('');
   const [section, setSection] = useState('websites');
 
+  // Excel status
+  const [excelExists, setExcelExists] = useState(false);
+
+  // helper: save previous filename before replacing
+  const replaceUploadedFileName = (newName) => {
+    console.log('[ImportFileView] replaceUploadedFileName called', { newName, uploadedFileName });
+    try {
+      const prev = uploadedFileName || window.localStorage.getItem('uploadedFileName');
+      if (prev && prev !== newName) {
+        window.localStorage.setItem('previousUploadedFileName', prev);
+      }
+    } catch (e) {
+      console.error('localStorage error saving previousUploadedFileName', e);
+    }
+    setUploadedFileName(newName);
+  };
+
   const handleFileSelect = async () => {
     try {
       const result = await window.api.showFileDialog();
+      console.log('[ImportFileView] showFileDialog result', result);
       if (result.success) {
         setSelectedFileName(result.filePath);
         setPendingFileData(result.content);
         setShowConfirm(true);
+        try {
+          const originalName = result.filePath ? result.filePath.split(/[/\\\\]/).pop() : null;
+          console.log('[ImportFileView] extracted originalName from selection', { originalName });
+          if (originalName) {
+            setOriginalUploadedFileName(originalName);
+            // show the selected original name immediately in the UI while preserving the previous stored name
+            try {
+              replaceUploadedFileName(originalName);
+            } catch (e) {
+              console.error('Error setting displayed uploadedFileName on select', e);
+            }
+          }
+        } catch (e) {
+          console.error('Error extracting original filename on select', e);
+        }
       }
     } catch (error) {
       showSnackbar('Hiba történt a fájl kiválasztása során!', 'error');
@@ -30,10 +66,59 @@ const ImportFileView = ({ showSnackbar }) => {
   const handleConfirm = async () => {
     try {
       setLoading(true);
-      const uploadResult = await window.api.uploadExcelFile(pendingFileData);
+      const uploadResult = await window.api.uploadExcelFile({ content: pendingFileData, originalPath: selectedFileName });
+      console.log('[ImportFileView] uploadResult', uploadResult);
       if (uploadResult.success) {
         showSnackbar('Fájl sikeresen feltöltve!', 'success');
+        // if main returned the filename, use it; otherwise fall back to parsing
+        if (uploadResult.filename) {
+          console.log('[ImportFileView] backend returned filename', uploadResult.filename);
+          replaceUploadedFileName(uploadResult.filename);
+        } else {
+          try {
+            const originalName = selectedFileName ? selectedFileName.split(/[/\\\\]/).pop() : null;
+            console.log('[ImportFileView] fallback originalName on confirm', { originalName });
+            if (originalName) replaceUploadedFileName(originalName);
+          } catch (e) {
+            console.error('Error extracting original filename', e);
+          }
+        }
         setSelectedFileName(null);
+        // refresh excel status and path using returned path if present
+        setExcelExists(true);
+        if (uploadResult.path) {
+          console.log('[ImportFileView] uploadResult.path', uploadResult.path);
+          setUploadedFilePath(uploadResult.path);
+          // If backend didn't return a filename, derive it from the returned path
+          if (!uploadResult.filename) {
+            try {
+              const nameFromPath = uploadResult.path?.split(/[/\\\\]/).pop();
+              if (nameFromPath) replaceUploadedFileName(nameFromPath);
+            } catch (e) {
+              console.error('Error extracting filename from uploadResult.path', e);
+            }
+          }
+        } else {
+          try {
+            const path = await window.api.getExcelPath?.();
+            setUploadedFilePath(path);
+            // also set a readable filename for display
+            try {
+              const nameFromPath = path ? path.split(/[/\\\\]/).pop() : null;
+              if (nameFromPath) replaceUploadedFileName(nameFromPath);
+            } catch (e) {
+              console.error('Error extracting filename from excel path', e);
+            }
+          } catch (e) {
+            console.error('Unable to get excel path after upload', e);
+          }
+        }
+        // Open the sheet editor so the user can edit the uploaded Excel
+        try {
+          window.api.setView?.('sheet-editor');
+        } catch (e) {
+          console.error('Failed to open sheet editor', e);
+        }
       } else {
         showSnackbar(`Hiba történt a feltöltés során: ${uploadResult.error}`, 'error');
       }
@@ -61,7 +146,65 @@ const ImportFileView = ({ showSnackbar }) => {
     }).catch(() => {
       setLoading(false);
     });
+
+    // check if an excel file already exists
+    window.api.getExcelStatus?.().then(async (exists) => {
+      setExcelExists(!!exists);
+      if (exists) {
+        try {
+          const path = await window.api.getExcelPath?.();
+          setUploadedFilePath(path);
+          // derive a readable filename from the path so the UI can display it
+            try {
+              const nameFromPath = path ? path.split(/[/\\\\]/).pop() : null;
+              if (nameFromPath) replaceUploadedFileName(nameFromPath);
+            } catch (e) {
+              console.error('Error extracting filename from excel path', e);
+            }
+        } catch (e) {
+          console.error('Error fetching excel path', e);
+        }
+      }
+    }).catch(() => {});
   }, []);
+
+  // load saved displayed filename from localStorage on mount (so it survives view reloads)
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('uploadedFileName');
+      if (saved) setUploadedFileName(saved);
+      const savedOriginal = window.localStorage.getItem('originalUploadedFileName') || window.localStorage.getItem('previousUploadedFileName');
+      if (savedOriginal) setOriginalUploadedFileName(savedOriginal);
+    } catch (e) {
+      // ignore localStorage failures
+    }
+  }, []);
+
+  // persist uploadedFileName to localStorage so it remains visible across reloads
+  useEffect(() => {
+    try {
+      if (uploadedFileName) {
+        window.localStorage.setItem('uploadedFileName', uploadedFileName);
+      } else {
+        window.localStorage.removeItem('uploadedFileName');
+      }
+    } catch (e) {
+      console.error('localStorage error saving uploadedFileName', e);
+    }
+  }, [uploadedFileName]);
+
+  // persist original filename so we can show the user's original name even if backend renames the file
+  useEffect(() => {
+    try {
+      if (originalUploadedFileName) {
+        window.localStorage.setItem('originalUploadedFileName', originalUploadedFileName);
+      } else {
+        window.localStorage.removeItem('originalUploadedFileName');
+      }
+    } catch (e) {
+      console.error('localStorage error saving originalUploadedFileName', e);
+    }
+  }, [originalUploadedFileName]);
 
   const handleAddUrl = () => {
     if (newWebUrl.trim() && !webUrls.includes(newWebUrl.trim())) {
@@ -107,6 +250,12 @@ const ImportFileView = ({ showSnackbar }) => {
     } else {
       setUrlError('');
     }
+  };
+
+
+  // open the dedicated sheet editor view
+  const openSheetEditor = () => {
+    window.api.setView('sheet-editor');
   };
 
   return (
@@ -205,6 +354,29 @@ const ImportFileView = ({ showSnackbar }) => {
                     </Button>
                   </Box>
                 </Paper>
+              )}
+
+              {excelExists && (
+                <Button
+                  variant="outlined"
+                  onClick={openSheetEditor}
+                  disabled={loading}
+                  sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)', mt: 2 }}
+                >
+                  Megnyitás szerkesztésre
+                </Button>
+              )}
+              {(originalUploadedFileName || uploadedFileName) && (
+                <Box sx={{ mt: 2, maxWidth: 640, textAlign: 'center' }}>
+                  <Typography sx={{ color: 'rgba(255,255,255,0.75)', wordBreak: 'break-all' }}>
+                    Feltöltött fájl: {originalUploadedFileName || uploadedFileName}
+                  </Typography>
+                  {originalUploadedFileName && originalUploadedFileName !== uploadedFileName && (
+                    <Typography sx={{ mt: 1, color: 'rgba(255,255,255,0.6)', wordBreak: 'break-all' }}>
+                      Tárolt név: {uploadedFileName}
+                    </Typography>
+                  )}
+                </Box>
               )}
             </Box>
           </Paper>

@@ -46,6 +46,7 @@ import NoConnectionView from './components/NoConnectionView.jsx';
 import UpdateView from "./components/UpdateView.jsx";
 import UpdateReadyView from "./components/UpdateReadyView.jsx";
 import LicenceActivationView from './components/LicenceActivationView.jsx';
+import SheetEditorView from './components/SheetEditorView';
 //import GeneratedMailsView from "./components/GeneratedMailsView.jsx";
 import { FaRegQuestionCircle, FaBars, FaThumbtack, FaHome, FaEnvelope, FaDatabase, FaRobot, FaCog, FaSignOutAlt, FaPowerOff, FaUserFriends } from 'react-icons/fa';
 import { FaEnvelopeCircleCheck } from "react-icons/fa6";
@@ -744,6 +745,7 @@ const App = () => {
       case 'mailStructure': return <MailStructureView showSnackbar={showSnackbar} />;
       case 'settings': return <SettingsView themeName={themeName} setThemeName={setThemeName} onAutoSendChanged={setAutoSend} onHalfAutoSendChanged={setHalfAuto} />;
       case 'import': return <ImportFileView showSnackbar={showSnackbar} />;
+  case 'sheet-editor': return <SheetEditorView showSnackbar={showSnackbar} />;
       case 'prompt': return <PromptView showSnackbar={showSnackbar} />;
       case 'help': return <HelpView showSnackbar={showSnackbar} />;
       default: return <HomeView showSnackbar={showSnackbar} reloadKey={activeView} />;

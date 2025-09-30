@@ -1,6 +1,5 @@
 Fontos:
     - KELL EGY TELJESN  ÚJ SZERVER (a meglévő weboldarra mehet) AMI KEZELI A BIZTONSÁGOS OPENAI GENERÁLOSOKAT API KULCSOKAT
-    - Kell excel view ahol betölti az excelt és lehet módosítani
     - Félautomata válaszadás
     - új ikon szín fekete-sárga
     - Saját nsis telepítő kliens

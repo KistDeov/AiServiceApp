@@ -54,6 +54,10 @@ contextBridge.exposeInMainWorld('api', {
   savePromptSettings: (data) => ipcRenderer.invoke('savePromptSettings', data),
   getWebSettings: () => ipcRenderer.invoke('getWebSettings'),
   saveWebSettings: (data) => ipcRenderer.invoke('saveWebSettings', data),
+  // Excel file operations
+  getExcelStatus: () => ipcRenderer.invoke('excel-exists'),
+  readExcelFile: () => ipcRenderer.invoke('read-excel-file'),
+  saveExcelFile: (data) => ipcRenderer.invoke('save-excel-file', data),
   getReplyStats: () => ipcRenderer.invoke('get-reply-stats'),
   readSentEmailsLog: () => ipcRenderer.invoke('read-sent-emails-log'),
   getSignatureImagePath: () => {
@@ -107,6 +111,7 @@ contextBridge.exposeInMainWorld('api', {
   restartApp: () => ipcRenderer.invoke('restart-app'),
   readGeneratedReplies: () => ipcRenderer.invoke('read-generated-replies'),
   saveGeneratedReplies: (replies) => ipcRenderer.invoke('save-generated-replies', replies),
+  getExcelPath: () => ipcRenderer.invoke('get-excel-path'),
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {

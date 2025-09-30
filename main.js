@@ -799,18 +799,42 @@ async function readExcelDataWithImages() {
 // Új Excel fájl feltöltése
 ipcMain.handle('upload-excel-file', async (event, fileContent) => {
   try {
-    const targetPath = path.join(app.getPath('userData'), 'adatok.xlsx');
-    
-    // Write the file content to disk
-    fs.writeFileSync(targetPath, Buffer.from(fileContent));
-    
-    // Ellenőrizzük, hogy olvasható-e az Excel fájl
+    // Accept either raw content or an object: { content, originalPath }
+    let contentBuffer = null;
+    let originalPath = null;
+    if (fileContent && typeof fileContent === 'object' && (fileContent.content || fileContent.originalPath)) {
+      if (fileContent.content) contentBuffer = Buffer.from(fileContent.content);
+      if (fileContent.originalPath) originalPath = fileContent.originalPath;
+    } else {
+      contentBuffer = Buffer.from(fileContent);
+    }
+
+    // Always save uploads to the userData folder as 'adatok.xlsx' (overwrite existing)
+    const userDataDir = app.getPath('userData');
+    if (!fs.existsSync(userDataDir)) fs.mkdirSync(userDataDir, { recursive: true });
+    const targetPath = path.join(userDataDir, 'adatok.xlsx');
+
+    // Write the file content to disk (overwrite)
+    fs.writeFileSync(targetPath, contentBuffer);
+
+    // Verify the written file is a readable workbook
     const workbook = XLSX.readFile(targetPath);
-    if (!workbook.SheetNames.length) {
+    if (!workbook.SheetNames || !workbook.SheetNames.length) {
+      // Remove the invalid file
+      try { fs.unlinkSync(targetPath); } catch (e) {}
       throw new Error('Az Excel fájl üres vagy nem olvasható!');
     }
-    
-    return { success: true };
+
+    // Determine the original filename (base name) if provided
+    let filename = null;
+    try {
+      if (originalPath) filename = path.basename(originalPath);
+    } catch (e) {
+      filename = null;
+    }
+
+    // Return success, absolute path and original filename (if known)
+    return { success: true, path: targetPath, filename };
   } catch (error) {
     console.error('Hiba az Excel fájl feltöltésekor:', error);
     return { success: false, error: error.message };
@@ -848,7 +872,7 @@ ipcMain.handle('show-image-dialog', async () => {
     try {
       const filePath = result.filePaths[0];
       const content = fs.readFileSync(filePath);
-      return { success: true, content: content };
+      return { success: true, content: content, filePath };
     } catch (error) {
       console.error('Hiba a fájl olvasásakor:', error);
       return { success: false, error: error.message };
@@ -920,6 +944,91 @@ ipcMain.handle('show-file-dialog', async () => {
     }
   }
   return { success: false, error: 'No file selected' };
+});
+
+// Excel helpers for renderer: check if adatok.xlsx exists, read and save
+ipcMain.handle('excel-exists', async () => {
+  try {
+    // Prefer the userData copy if present (that's where uploads are written)
+    const userDataExcel = path.join(app.getPath('userData'), 'adatok.xlsx');
+    if (fs.existsSync(userDataExcel)) return true;
+
+    // Fallback to searching common locations (packaged/dev)
+    try {
+      const excelFile = findFile('adatok.xlsx');
+      return fs.existsSync(excelFile);
+    } catch (e) {
+      return false;
+    }
+  } catch (e) {
+    console.error('excel-exists error', e);
+    return false;
+  }
+});
+
+// Return the absolute path to the current adatok.xlsx if it exists, otherwise null
+ipcMain.handle('get-excel-path', async () => {
+  try {
+    // Prefer the copy in userData (uploads are saved here)
+    const userDataExcel = path.join(app.getPath('userData'), 'adatok.xlsx');
+    if (fs.existsSync(userDataExcel)) return userDataExcel;
+
+    // Fallback to searching common locations
+    try {
+      const excelFile = findFile('adatok.xlsx');
+      return fs.existsSync(excelFile) ? excelFile : null;
+    } catch (e) {
+      return null;
+    }
+  } catch (e) {
+    return null;
+  }
+});
+
+ipcMain.handle('read-excel-file', async () => {
+  try {
+    // Prefer the userData copy
+    let excelFile = path.join(app.getPath('userData'), 'adatok.xlsx');
+    if (!fs.existsSync(excelFile)) {
+      try {
+        excelFile = findFile('adatok.xlsx');
+      } catch (e) {
+        return { success: false, error: 'No file' };
+      }
+    }
+
+    // Use XLSX to read quickly into arrays
+    const workbook = XLSX.readFile(excelFile, { cellDates: true });
+    const sheets = workbook.SheetNames.map((name) => {
+      const ws = workbook.Sheets[name];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      return { name, data };
+    });
+    return { success: true, sheets };
+  } catch (error) {
+    console.error('read-excel-file error', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('save-excel-file', async (event, payload) => {
+  try {
+    if (!payload || !Array.isArray(payload.sheets)) throw new Error('Invalid payload');
+    const workbook = new ExcelJS.Workbook();
+    for (const sheet of payload.sheets) {
+      const ws = workbook.addWorksheet(sheet.name || 'Sheet');
+      // sheet.data expected as array of arrays
+      (sheet.data || []).forEach((row) => {
+        ws.addRow(row);
+      });
+    }
+    const targetPath = findFile("adatok.xlsx");
+    await workbook.xlsx.writeFile(targetPath);
+    return { success: true };
+  } catch (error) {
+    console.error('save-excel-file error', error);
+    return { success: false, error: error.message };
+  }
 });
 
 // IPC handlers for prompt settings
