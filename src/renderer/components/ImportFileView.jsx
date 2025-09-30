@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Paper, CircularProgress, Button, TextField, IconButton, List, ListItem, ListItemText } from '@mui/material';
-import { MdDelete } from "react-icons/md";
-
+import { Box, Typography, Paper, CircularProgress, Button, TextField, IconButton, List, ListItem, ListItemText, Tabs, Tab } from '@mui/material';
+import { MdDelete } from 'react-icons/md';
 
 const ImportFileView = ({ showSnackbar }) => {
   const [selectedFileName, setSelectedFileName] = useState(null);
@@ -12,6 +11,7 @@ const ImportFileView = ({ showSnackbar }) => {
   const [newWebUrl, setNewWebUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [urlError, setUrlError] = useState('');
+  const [section, setSection] = useState('websites');
 
   const handleFileSelect = async () => {
     try {
@@ -87,15 +87,15 @@ const ImportFileView = ({ showSnackbar }) => {
   };
 
   const validateUrl = (url) => {
-  const urlPattern = new RegExp(
-  '^(https?:\\/\\/)?' + // protocol
-  '((([a-zA-Z\\d]([a-zA-Z\\d-]*[a-zA-Z\\d])*)\\.)+[a-zA-Z]{2,}|' + // domain name
-  '((\\d{1,3}\\.){3}\\d{1,3}))' + // OR ip (v4) address
-  '(\\:\\d+)?(\\/[-a-zA-Z\\d%_.~+()]*)*' + // port and path
-  '(\\?[;&a-zA-Z\\d%_.~+=-]*)?' + // query string
-  '(\\#[-a-zA-Z\\d_]*)?$',
-  'i' // fragment locator
-  );
+    const urlPattern = new RegExp(
+      '^(https?:\\/\\/)?' + // protocol
+      '((([a-zA-Z\\d]([a-zA-Z\\d-]*[a-zA-Z\\d])*)\\.)+[a-zA-Z]{2,}|' + // domain name
+      '((\\d{1,3}\\.){3}\\d{1,3}))' + // OR ip (v4) address
+      '(\\:\\d+)?(\\/[-a-zA-Z\\d%_.~+()]*)*' + // port and path
+      '(\\?[;&a-zA-Z\\d%_.~+=-]*)?' + // query string
+      '(\\#[-a-zA-Z\\d_]*)?$',
+      'i' // fragment locator
+    );
     return !!urlPattern.test(url);
   };
 
@@ -111,84 +111,106 @@ const ImportFileView = ({ showSnackbar }) => {
 
   return (
     <Paper sx={{ p: 4 }}>
+      <Tabs value={section} onChange={(e, val) => setSection(val)} variant="standard" centered sx={{ mb: 2 }}>
+        <Tab label="Weboldalak" value="websites" />
+        <Tab label="Excel feltöltés" value="excel" />
+      </Tabs>
+
       <Box>
-        <Typography variant="h4" gutterBottom>Weboldalak megadása</Typography>
-        <Typography variant="h8" gutterBottom>Itt megadhatod a vállalkozásod, céged weboldalait, hogy az AI megértse mivel foglalkozik a céged, ezzel segítve a pontosabb válaszadást.</Typography>
-        <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-          <TextField
-            label="Új weboldal URL"
-            fullWidth
-            value={newWebUrl}
-            onChange={handleUrlChange}
-            error={!!urlError}
-            helperText={urlError}
-          />
-          <Button variant="contained" color="primary" onClick={handleAddUrl} disabled={!newWebUrl.trim() || !!urlError}>
-            Hozzáadás
-          </Button>
-        </Box>
-        <List sx={{ mt: 2, maxHeight: 180, overflowY: 'auto' }}>
-          {webUrls.map((url, index) => (
-            <ListItem key={index} secondaryAction={
-              <IconButton edge="end" aria-label="delete" onClick={() => handleDeleteUrl(url)}>
-                <MdDelete />
-              </IconButton>
-            }>
-              <ListItemText primary={url} />
-            </ListItem>
-          ))}
-        </List>
-      </Box>
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 4 }}>
-        <Button variant="contained" color="primary" onClick={handleSave} disabled={saving || loading}>
-          {saving ? 'Mentés...' : 'Mentés'}
-        </Button>
-      </Box>
-      
-      <Box sx={{mt:4}}>
-        <Typography variant="h4" gutterBottom>Adatbázis importálása</Typography>
-        <Typography variant="h8" color="warning" gutterBottom>Az adatok az AI-nak lesznek átadva. Ne adjon meg semmilyen olyan kényes adatot, amit az interneten sem osztana meg!</Typography>
-        <Box sx={{ mt: 3 }}>
-          <Button
-            variant="contained"
-            onClick={handleFileSelect}
-            disabled={loading}
-          >
-            {loading ? <CircularProgress size={24} /> : 'Excel fájl kiválasztása'}
-          </Button>
-          {selectedFileName && (
-            <Typography sx={{ mt: 2 }}>
-              Kiválasztott fájl: {selectedFileName}
-            </Typography>
-          )}
-          {showConfirm && (
-            <Box sx={{ mt: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1 }}>
-              <Typography sx={{ mb: 2 }}>
-                Figyelem! A feltöltés felülírja a meglévő adatbázist. Biztosan szeretnéd folytatni?
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 2 }}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleConfirm}
-                  disabled={loading}
-                >
-                  Feltöltés és felülírás
-                </Button>
-                <Button
-                  variant="outlined"
-                  onClick={handleCancel}
-                  disabled={loading}
-                >
-                  Mégsem
-                </Button>
-              </Box>
+        {section === 'websites' && (
+          <Paper variant="outlined" sx={{ p: 4, bgcolor: '#181818', color: 'white', borderRadius: 1, boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
+            <Typography variant="h4" gutterBottom sx={{ color: 'white', textAlign: 'center' }}>Weboldalak megadása</Typography>
+            <Typography variant="h8" gutterBottom sx={{ color: 'rgba(255,255,255,0.75)', textAlign: 'center' }}>Itt megadhatod a vállalkozásod, céged weboldalait, hogy az AI megértse mivel foglalkozik a céged, ezzel segítve a pontosabb válaszadást.</Typography>
+
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, mt: 2 }}>
+              <TextField
+                label="Új weboldal URL"
+                fullWidth
+                value={newWebUrl}
+                onChange={handleUrlChange}
+                error={!!urlError}
+                helperText={urlError}
+                sx={{ maxWidth: 640 }}
+                InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.85)' } }}
+                inputProps={{ style: { color: 'white' } }}
+              />
+              <Button variant="contained" onClick={handleAddUrl} disabled={!newWebUrl.trim() || !!urlError} sx={{ mt: 1, bgcolor: '#ffd400', color: '#000', '&:hover': { bgcolor: '#ffdb4d' }, width: 180 }}>
+                Hozzáadás
+              </Button>
             </Box>
-          )}
-        </Box>
+
+            <List sx={{ mt: 3, maxHeight: 140, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              {webUrls.map((url, index) => (
+                <ListItem key={index} sx={{ width: '100%', maxWidth: 640, bgcolor: 'rgba(255,255,255,0.02)', borderRadius: 1, mb: 1 }} secondaryAction={
+                  <IconButton edge="end" aria-label="delete" onClick={() => handleDeleteUrl(url)} sx={{ color: 'white' }}>
+                    <MdDelete />
+                  </IconButton>
+                }>
+                  <ListItemText primary={url} primaryTypographyProps={{ sx: { color: 'white', wordBreak: 'break-all' } }} />
+                </ListItem>
+              ))}
+            </List>
+
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+              <Button variant="contained" onClick={handleSave} disabled={saving || loading} sx={{ mt: 1, bgcolor: '#ffd400', color: '#000', '&:hover': { bgcolor: '#ffdb4d' }}}>
+                {saving ? 'Mentés...' : 'Mentés'}
+              </Button>
+            </Box>
+          </Paper>
+        )}
+
+        {section === 'excel' && (
+          <Paper variant="outlined" sx={{ p: 4, mt: 1, bgcolor: '#181818', color: 'white', borderRadius: 1, boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
+            <Typography variant="h4" gutterBottom sx={{ color: 'white', textAlign: 'center' }}>Adatbázis importálása</Typography>
+            <Typography variant="h8" gutterBottom sx={{ color: 'rgba(228, 125, 0, 1)', textAlign: 'center' }}>Az adatok az AI-nak lesznek átadva. Ne adjon meg semmilyen olyan kényes adatot, amit az interneten sem osztana meg!</Typography>
+
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 3 }}>
+              <Button
+                variant="contained"
+                onClick={handleFileSelect}
+                disabled={loading}
+                sx={{ bgcolor: '#ffd400', color: '#000', '&:hover': { bgcolor: '#ffdb4d' }, width: 220 }}
+              >
+                {loading ? <CircularProgress size={24} /> : 'Excel fájl kiválasztása'}
+              </Button>
+
+              {selectedFileName && (
+                <Typography sx={{ mt: 2, color: 'white', wordBreak: 'break-all', maxWidth: 640, textAlign: 'center' }}>
+                  Kiválasztott fájl: {selectedFileName}
+                </Typography>
+              )}
+
+              {showConfirm && (
+                <Paper sx={{ mt: 3, p: 2, bgcolor: '#222', borderRadius: 1, maxWidth: 640, width: '100%', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <Typography sx={{ mb: 2, color: 'white' }}>
+                    Figyelem! A feltöltés felülírja a meglévő adatbázist. Biztosan szeretnéd folytatni?
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={handleConfirm}
+                      disabled={loading}
+                      sx={{ bgcolor: '#ffd400', color: '#000', '&:hover': { bgcolor: '#ffdb4d' } }}
+                    >
+                      Feltöltés és felülírás
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={handleCancel}
+                      disabled={loading}
+                      sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}
+                    >
+                      Mégsem
+                    </Button>
+                  </Box>
+                </Paper>
+              )}
+            </Box>
+          </Paper>
+        )}
       </Box>
     </Paper>
-
   );
 };
 

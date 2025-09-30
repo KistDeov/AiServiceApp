@@ -82,15 +82,9 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
           <CircularProgress />
         </Box>
       ) : (
-        <><Typography variant="body1" gutterBottom sx={{ mt: 4 }}>
-            0 db válasz előkészítve a küldésre
-
-          <IconButton onClick={() => handleViewChange('generatedMails')} size="large" sx={{ ml: 1, color: 'primary.main' }}>
-            <FaArrowCircleRight />
-          </IconButton>
-          </Typography><Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mt: 4, mb: 1 }}>
-              <ReplyStatsChart data={statsData} width={300} height={100} />
-            </Box></>
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mt: 4, mb: 1 }}>
+          <ReplyStatsChart data={statsData} width={300} height={100} />
+        </Box>
       )}
     </Paper>
   );

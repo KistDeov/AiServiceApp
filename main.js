@@ -32,8 +32,8 @@ if (!gotTheLock) {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const REPLIED_EMAILS_FILE = findFile('RepliedEmails.json');
-
+const REPLIED_EMAILS_FILE = findFile('repliedEmails.json');
+const GENERATED_REPLIES_FILE = findFile('GeneratedReplies.json');
 
 // Környezeti változók és útvonalak kezelése
 const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json');
@@ -382,6 +382,7 @@ async function getEmailsBasedOnProvider() {
     });
   }
 
+  console.log('Emails after date filtering:', emails.map(email => ({ id: email.id, subject: email.subject })));
   return emails;
 }
 
@@ -438,20 +439,46 @@ function startEmailMonitoring() {
       // --- SPAM + IGNORED szűrés ---
       const spamKeywords = ['no-reply','noreply','no reply','spam', 'junk', 'promóció', 'reklám', 'ad', 'free money', "guaranteed", "amazing deal", "act now", "limited time", "click here", "buy now"];
       let unreadEmails = await getEmailsBasedOnProvider();
-      // Filter out spam and ignored emails
+      // Filter out spam and ignored emails (with logging and safer whole-word matching)
       const ignoredEmailsList = (settings.ignoredEmails || []).map(e => e.trim().toLowerCase()).filter(Boolean);
+
+      // Helper to escape regex special chars
+      const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      // Build regexes for whole-word matching of spam keywords
+      const spamRegexes = spamKeywords.map(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i'));
+
+      const beforeCount = unreadEmails.length;
+      const filteredOut = [];
       unreadEmails = unreadEmails.filter(email => {
         const subject = (email.subject || '').toLowerCase();
         const from = (email.from || '').toLowerCase();
+
         // Gmail esetén labelIds tartalmazza-e a SPAM-t
-        if (email.labelIds && Array.isArray(email.labelIds) && email.labelIds.includes('SPAM')) return false;
-        // Subject vagy from tartalmaz spam kulcsszót
-        if (spamKeywords.some(word => subject.includes(word) || from.includes(word))) return false;
-        // Ignore, ha benne van az ignoredEmails-ben
-        if (ignoredEmailsList.some(ignored => from.includes(ignored))) return false;
+        if (email.labelIds && Array.isArray(email.labelIds) && email.labelIds.includes('SPAM')) {
+          filteredOut.push({ id: email.id, reason: 'label SPAM', subject: email.subject, from: email.from });
+          return false;
+        }
+
+        // Subject vagy from tartalmaz spam kulcsszót (whole-word match)
+        const matchedSpam = spamRegexes.find(rx => rx.test(email.subject || '') || rx.test(email.from || ''));
+        if (matchedSpam) {
+          filteredOut.push({ id: email.id, reason: 'spamKeyword', matched: matchedSpam.source, subject: email.subject, from: email.from });
+          return false;
+        }
+
+        // Ignore, ha benne van az ignoredEmails-ben (substring match for ignored entries)
+        const matchedIgnored = ignoredEmailsList.find(ignored => from.includes(ignored));
+        if (matchedIgnored) {
+          filteredOut.push({ id: email.id, reason: 'ignoredEmail', matchedIgnored, subject: email.subject, from: email.from });
+          return false;
+        }
+
         return true;
       });
-      console.log('Fetched emails (spam+ignored szűrve):', unreadEmails.length);
+
+      console.log('Fetched emails (spam+ignored szűrve):', unreadEmails.length, `(before: ${beforeCount})`);
+      if (filteredOut.length) console.log('Filtered out emails (with reasons):', filteredOut);
 
       // Notify renderer about new emails for MailView update
       BrowserWindow.getAllWindows().forEach(window => {
@@ -711,6 +738,28 @@ function saveRepliedEmails(ids) {
     console.error('Hiba a válaszolt levelek mentésekor:', err);
   }
 }
+
+function readGeneratedReplies() {
+  try {
+    if (fs.existsSync(GENERATED_REPLIES_FILE)) {
+      const data = fs.readFileSync(GENERATED_REPLIES_FILE, 'utf-8');
+      return JSON.parse(data);
+    }
+    return {};
+  } catch (err) {
+    console.error('Hiba a generated_replies.json beolvasásakor:', err);
+    return {};
+  }
+}
+
+function saveGeneratedReplies(replies) {
+  try {
+    fs.writeFileSync(GENERATED_REPLIES_FILE, JSON.stringify(replies, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Hiba a generated_replies.json mentésekor:', err);
+  }
+}
+
 
 // Excel fájl kezelése
 async function readExcelDataWithImages() {
@@ -985,7 +1034,7 @@ async function generateReply(email) {
       .replace('{webUrls}', combinedHtml || 'N/A');
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-3.5-turbo",
       messages: [
         { 
           role: "system", 
@@ -1155,7 +1204,9 @@ ipcMain.handle('get-unread-emails', async () => {
     // Ensure email fetching only starts for the correct provider
     if (authState.provider === 'gmail') {
       console.log('Using Gmail provider, starting Gmail email fetching...');
-      return await getEmailsBasedOnProvider();
+      const emails = await getEmailsBasedOnProvider();
+      console.log('Fetched emails:', emails.map(email => ({ id: email.id, subject: email.subject })));
+      return emails;
     } else if (authState.provider === 'smtp') {
       console.log('Using SMTP provider, skipping Gmail email fetching.');
       return []; // Skip Gmail fetching
@@ -1614,11 +1665,9 @@ ipcMain.handle('get-replied-email-ids', async () => {
 ipcMain.handle('get-reply-stats', async () => {
   try {
     const sentLog = readSentEmailsLog();
-    console.log('[get-reply-stats] Sent log:', sentLog);
     if (!sentLog || sentLog.length === 0) return [];
     // Csak az utolsó 100 rekordot nézzük teljesítmény miatt
     const recent = sentLog.slice(-100);
-    console.log('[get-reply-stats] Recent log:', recent);
     // Aggregálás nap szerint (utolsó 5 nap)
     const counts = {};
     const now = new Date();
@@ -1639,7 +1688,6 @@ ipcMain.handle('get-reply-stats', async () => {
     const sorted = Object.entries(counts)
       .map(([date, count]) => ({ date, count }))
       .sort((a, b) => new Date(a.date.split('.').reverse().join('-')) - new Date(b.date.split('.').reverse().join('-')));
-    console.log('[get-reply-stats] Aggregated stats:', sorted);
     return sorted;
   } catch (e) {
     console.error('[get-reply-stats] Error:', e);
@@ -1918,4 +1966,12 @@ ipcMain.handle('set-view', async (event, view) => {
 
   mainWindow.webContents.send('set-view', view);
   return true;
+});
+
+ipcMain.handle('read-generated-replies', async () => {
+  return readGeneratedReplies();
+});
+
+ipcMain.handle('save-generated-replies', async (event, replies) => {
+  saveGeneratedReplies(replies);
 });

@@ -15,9 +15,13 @@ import {
   DialogActions,
   Button,
   RadioGroup,
-  Radio
+  Radio,
+  Grid,
+  Divider
 } from '@mui/material';
-import { ml } from 'googleapis/build/src/apis/ml';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
+// Note: removed unused import
 
 const HalfAutoSendConfirmDialog = ({ open, onClose, onConfirm }) => {
   return (
@@ -162,6 +166,10 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
   const [maxEmailDate, setMaxEmailDate] = useState(""); // ÚJ
   const [notifyOnAutoReply, setNotifyOnAutoReply] = useState(false);
   const [notificationEmail, setNotificationEmail] = useState("");
+  const [section, setSection] = useState('appearance');
+
+  // Fixed width for the section panels (in pixels). Change this value to adjust the width.
+  const sectionWidth = 1250;
 
   // Load settings
   useEffect(() => {
@@ -336,173 +344,103 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
 
   return (
     <>
-      <Paper sx={{
-        p: 4,
-        maxHeight: '84vh',
-        overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'column'
-      }}>
-        <Box sx={{
-          overflowY: 'auto',
-          flex: 1,
-          pr: 2,
-          mr: -2
-        }}>
+      <Paper sx={{ p: 3, height: '80vh', width: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', pr: 2, overflow: 'hidden' }}>
           <Typography variant="h4" gutterBottom>Beállítások</Typography>
-          <FormGroup>
-            <FormControlLabel
-              control={
-                <Switch
-                  sx={{ ml: 1 }}
-                  checked={autoSend || pendingAutoSend}
-                  onChange={handleAutoSendChange}
-                />
-              }
-              label="Automatikus válaszküldés"
-            />
-            <FormControlLabel
-              control={
-                <Switch
-                  sx={{ ml: 1 }}
-                  checked={halfAuto || pendingHalfAuto}
-                  onChange={handleHalfAutoSendChange}
-                />
-              }
-              label="Félautomata válaszküldés"
-            />
-          
 
-            
-            <Box sx={{ mt: 4 }}>
-              <Typography variant="h6" gutterBottom>
-                Megjelenítési mód
-              </Typography>
-              
-              <RadioGroup
-                value={displayMode}
-                onChange={handleDisplayModeChange}
-              >
-                <FormControlLabel 
-                  value="windowed" 
-                  control={<Radio />} 
-                  label="Ablakos mód" 
-                />
-                <FormControlLabel 
-                  value="fullscreen" 
-                  control={<Radio />} 
-                  label="Teljes képernyő" 
-                />
-              </RadioGroup>
-              
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Válassza ki az alkalmazás megjelenítési módját. A változtatások azonnal életbe lépnek.
-              </Typography>
-            </Box>
-            <Box sx={{ mt: 4 }}>
-              <Typography variant="h6" gutterBottom>
-                Téma
-              </Typography>
-              <RadioGroup
-                value={themeName}
-                onChange={e => setThemeName(e.target.value)}
-                row
-              >
-                {themeOptions.map(opt => (
-                  <FormControlLabel key={opt.value} value={opt.value} control={<Radio />} label={opt.label} />
-                ))}
-              </RadioGroup>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Válassza ki az alkalmazás színvilágát. A változtatás azonnal látszik.
-              </Typography>
-            </Box>
-            <Box sx={{ mt: 4 }}>
-              <Typography variant="h6" gutterBottom>
-                Tiltott email címek (szűrő)
-              </Typography>
-              <TextField
-                label="Email címek vesszővel elválasztva"
-                value={ignoredEmails}
-                onChange={handleIgnoredEmailsChange}
-                onBlur={handleIgnoredEmailsBlur}
-                placeholder="pl. spam@example.com, noreply@domain.hu"
-                fullWidth
-                multiline
-                minRows={2}
-                sx={{ mt: 1 }}
-              />
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Az itt megadott email címekről érkező leveleket a rendszer figyelmen kívül hagyja a válaszküldésnél (mint a spamet).
-              </Typography>
-            </Box>
-            <Box sx={{ mt: 4 }}>
-              <Typography variant="h6" gutterBottom>
-                Csak a megadott dátumok között érkezett levelek feldolgozása
-              </Typography>
-              <TextField
-                label="Minimum dátum"
-                type="date"
-                value={minEmailDate}
-                onChange={handleMinEmailDateChange}
-                InputLabelProps={{ shrink: true }}
-                sx={{ mt: 1, width: 220 }}
-              />
-              <TextField
-                label="Maximum dátum"
-                type="date"
-                value={maxEmailDate}
-                onChange={handleMaxEmailDateChange}
-                InputLabelProps={{ shrink: true }}
-                sx={{ mt: 1, width: 220, ml: 2 }}
-              />
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Csak az itt megadott dátumok között érkezett leveleket dolgozza fel a rendszer.
-              </Typography>
-            </Box>
-            <Box sx={{ mt: 4 }}>
-              <Typography variant="h6" gutterBottom>
-                Automatikus válasz értesítések
-              </Typography>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={notifyOnAutoReply}
-                    onChange={handleNotifyOnAutoReplyChange}
-                  />
-                }
-                label="Értesítés küldése automatikus válasz esetén"
-              />
-              {notifyOnAutoReply && (
-                <TextField
-                  label="Értesítési email cím"
-                  value={notificationEmail}
-                  onChange={handleNotificationEmailChange}
-                  placeholder="pl. admin@example.com"
-                  fullWidth
-                  sx={{ mt: 2 }}
-                />
+          <Tabs value={section} onChange={(e, val) => setSection(val)} variant="fullWidth" sx={{ mb: 2 }}>
+            <Tab label="Kinézet" value="appearance" />
+            <Tab label="Auto" value="autosend" />
+            <Tab label="Szűrések" value="filters" />
+          </Tabs>
+
+          <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
+            <Grid container spacing={3} sx={{ height: '100%', width: '100%', flex: 1 }}>
+              {section === 'appearance' && (
+                <Grid item xs={12} sx={{ height: '100%', display: 'flex', justifyContent: 'center' }}>
+                  <Paper variant="outlined" sx={{ p: 3, height: '100%', width: sectionWidth, maxWidth: '100%', display: 'flex', flexDirection: 'column', overflow: 'auto', flex: 'none', mx: 'auto' }}>
+                    <Box sx={{ width: '100%' }}>
+                      <Typography variant="h6" gutterBottom align="center">Kinézet</Typography>
+                      <Divider sx={{ mb: 2 }} />
+
+                      <Box sx={{ mb: 2 }}>
+                        <Typography variant="subtitle1">Megjelenítési mód</Typography>
+                        <RadioGroup value={displayMode} onChange={handleDisplayModeChange}>
+                          <FormControlLabel value="windowed" control={<Radio />} label="Ablakos mód" />
+                          <FormControlLabel value="fullscreen" control={<Radio />} label="Teljes képernyő" />
+                        </RadioGroup>
+                        <Typography variant="body2" color="text.secondary">Válassza ki az alkalmazás megjelenítési módját. A változtatások azonnal életbe lépnek.</Typography>
+                      </Box>
+
+                      <Box>
+                        <Typography variant="subtitle1">Téma</Typography>
+                        <RadioGroup value={themeName} onChange={e => setThemeName(e.target.value)} row>
+                          {themeOptions.map(opt => (
+                            <FormControlLabel key={opt.value} value={opt.value} control={<Radio />} label={opt.label} />
+                          ))}
+                        </RadioGroup>
+                        <Typography variant="body2" color="text.secondary">Válassza ki az alkalmazás színvilágát. A változtatás azonnal látszik.</Typography>
+                      </Box>
+                    </Box>
+                  </Paper>
+                </Grid>
               )}
-            </Box>
-          </FormGroup>
+
+              {section === 'autosend' && (
+                <Grid item xs={12} sx={{ height: '100%', display: 'flex', justifyContent: 'center' }}>
+                  <Paper variant="outlined" sx={{ p: 3, height: '100%', width: sectionWidth, maxWidth: '100%', display: 'flex', flexDirection: 'column', overflow: 'auto', flex: 'none', mx: 'auto' }}>
+                    <Box sx={{ width: '100%' }}>
+                      <Typography variant="h6" gutterBottom align="center">Automata válaszküldés</Typography>
+                      <Divider sx={{ mb: 2 }} />
+
+                      <FormGroup>
+                        <FormControlLabel control={<Switch sx={{ ml: 1 }} checked={autoSend || pendingAutoSend} onChange={handleAutoSendChange} />} label="Automatikus válaszküldés" />
+
+                        <Box sx={{ mt: 2 }}>
+                          <FormControlLabel control={<Switch sx={{ ml: 1 }} checked={notifyOnAutoReply} onChange={handleNotifyOnAutoReplyChange} />} label="Értesítés küldése automatikus válasz esetén" />
+                          {notifyOnAutoReply && (
+                            <TextField label="Értesítési email cím" value={notificationEmail} onChange={handleNotificationEmailChange} placeholder="pl. admin@example.com" fullWidth sx={{ mt: 1 }} />
+                          )}
+                        </Box>
+                      </FormGroup>
+                    </Box>
+                  </Paper>
+                </Grid>
+              )}
+
+              {section === 'filters' && (
+                <Grid item xs={12} sx={{ height: '100%', display: 'flex', justifyContent: 'center' }}>
+                  <Paper variant="outlined" sx={{ p: 3, height: '100%', width: sectionWidth, maxWidth: '100%', display: 'flex', flexDirection: 'column', overflow: 'auto', flex: 'none', mx: 'auto' }}>
+                    <Box sx={{ width: '100%' }}>
+                      <Typography variant="h6" gutterBottom align="center">Szűrések</Typography>
+                      <Divider sx={{ mb: 2 }} />
+
+                      <Box sx={{ mb: 2 }}>
+                        <Typography variant="subtitle1">Tiltott email címek (szűrő)</Typography>
+                        <TextField label="Email címek vesszővel elválasztva" value={ignoredEmails} onChange={handleIgnoredEmailsChange} onBlur={handleIgnoredEmailsBlur} placeholder="pl. spam@example.com, noreply@domain.hu" fullWidth multiline minRows={2} sx={{ mt: 1 }} />
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Az itt megadott email címekről érkező leveleket a rendszer figyelmen kívül hagyja a válaszküldésnél (mint a spamet).</Typography>
+                      </Box>
+
+                      <Box>
+                        <Typography variant="subtitle1">Csak a megadott dátumok között érkezett levelek feldolgozása</Typography>
+                        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mt: 1 }}>
+                          <TextField label="Minimum dátum" type="date" value={minEmailDate} onChange={handleMinEmailDateChange} InputLabelProps={{ shrink: true }} sx={{ width: 220 }} />
+                          <TextField label="Maximum dátum" type="date" value={maxEmailDate} onChange={handleMaxEmailDateChange} InputLabelProps={{ shrink: true }} sx={{ width: 220 }} />
+                        </Box>
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Csak az itt megadott dátumok között érkezett leveleket dolgozza fel a rendszer.</Typography>
+                      </Box>
+                    </Box>
+                  </Paper>
+                </Grid>
+              )}
+            </Grid>
+          </Box>
         </Box>
       </Paper>
 
-      <AutoSendConfirmDialog
-        open={showConfirmDialog}
-        onClose={handleCancelAutoSend}
-        onConfirm={handleConfirmAutoSend}
-        startTime={startTime}
-        endTime={endTime}
-        onTimeChange={handleTimeChange}
-        timedAutoSend={timedAutoSend}
-        onTimedAutoSendChange={handleTimedAutoSendChange}
-      />
+      <AutoSendConfirmDialog open={showConfirmDialog} onClose={handleCancelAutoSend} onConfirm={handleConfirmAutoSend} startTime={startTime} endTime={endTime} onTimeChange={handleTimeChange} timedAutoSend={timedAutoSend} onTimedAutoSendChange={handleTimedAutoSendChange} />
 
-      <HalfAutoSendConfirmDialog
-        open={showHalfAutoConfirmDialog}
-        onClose={handleCancelHalfAutoSend}
-        onConfirm={handleConfirmHalfAutoSend}
-      />
+      <HalfAutoSendConfirmDialog open={showHalfAutoConfirmDialog} onClose={handleCancelHalfAutoSend} onConfirm={handleConfirmHalfAutoSend} />
 
     </>
   );

@@ -104,7 +104,9 @@ contextBridge.exposeInMainWorld('api', {
   handleUpdateAction: (action) => {
     ipcRenderer.invoke('handle-update-action', action);
   },
-  restartApp: () => ipcRenderer.invoke('restart-app')
+  restartApp: () => ipcRenderer.invoke('restart-app'),
+  readGeneratedReplies: () => ipcRenderer.invoke('read-generated-replies'),
+  saveGeneratedReplies: (replies) => ipcRenderer.invoke('save-generated-replies', replies),
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {

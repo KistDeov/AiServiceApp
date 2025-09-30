@@ -18,6 +18,8 @@ const MailsView = ({ showSnackbar }) => {
     window.api.onEmailsUpdated((newEmails) => {
       let repliedSet = new Set(repliedEmailIds);
       const filtered = newEmails.filter(email => !repliedSet.has(email.id));
+      console.log('Updated emails:', newEmails);
+      console.log('Filtered emails:', filtered);
       setEmails(filtered);
     });
     window.api.getUnreadEmails()
@@ -25,6 +27,8 @@ const MailsView = ({ showSnackbar }) => {
         let repliedSet = new Set();
         setLoading(false);
         const filtered = data.filter(email => !repliedSet.has(email.id));
+        console.log('Fetched unread emails:', data);
+        console.log('Filtered unread emails:', filtered);
         setRepliedEmailIds(repliedSet);
         setEmails(filtered);
       })
@@ -107,14 +111,20 @@ const MailsView = ({ showSnackbar }) => {
   const filteredEmails = emails.filter(email => {
     const q = search.toLowerCase();
     const dateStr = email.date ? new Date(email.date).toISOString().slice(0, 10) : '';
-    return (
+    const matches = (
       (!q) ||
       (email.subject && email.subject.toLowerCase().includes(q)) ||
       (email.from && email.from.toLowerCase().includes(q)) ||
       (email.body && email.body.toLowerCase().includes(q)) ||
       (dateStr && dateStr.includes(q))
     );
+    if (!matches) {
+      console.log('Filtered out email:', email);
+    }
+    return matches;
   });
+
+  console.log('Filtered emails for display:', filteredEmails);
 
   if (loading) return <CircularProgress />;
 
@@ -200,7 +210,7 @@ const MailsView = ({ showSnackbar }) => {
   return (
     <Paper sx={{ 
       p: 4,
-      maxHeight: '550px',
+      maxHeight: '84vh',
       overflow: 'hidden',
       display: 'flex',
       flexDirection: 'column'
