@@ -371,11 +371,6 @@ const ImportFileView = ({ showSnackbar }) => {
                   <Typography sx={{ color: 'rgba(255,255,255,0.75)', wordBreak: 'break-all' }}>
                     Feltöltött fájl: {originalUploadedFileName || uploadedFileName}
                   </Typography>
-                  {originalUploadedFileName && originalUploadedFileName !== uploadedFileName && (
-                    <Typography sx={{ mt: 1, color: 'rgba(255,255,255,0.6)', wordBreak: 'break-all' }}>
-                      Tárolt név: {uploadedFileName}
-                    </Typography>
-                  )}
                 </Box>
               )}
             </Box>

@@ -937,7 +937,8 @@ ipcMain.handle('show-file-dialog', async () => {
     try {
       const filePath = result.filePaths[0];
       const content = fs.readFileSync(filePath);
-      return { success: true, content: content };
+      const filename = filePath ? filePath.split(/[/\\\\]/).pop() : null;
+      return { success: true, content: content, filePath, filename };
     } catch (error) {
       console.error('Hiba a fájl olvasásakor:', error);
       return { success: false, error: error.message };
