@@ -1,6 +1,6 @@
 {
   "name": "aimail",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "An aplication that uses AI to answer mails",
   "main": "main.js",
   "type": "module",
@@ -27,6 +27,7 @@
       "requestedExecutionLevel": "requireAdministrator"
     },
     "nsis": {
+      "include": "build/custom.nsi",
       "oneClick": false,
       "installerIcon": "./assets/icon.ico",
       "uninstallerIcon": "./assets/icon.ico",
