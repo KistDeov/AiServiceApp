@@ -1,9 +1,8 @@
 Fontos:
-    - KELL EGY TELJESN  ÚJ SZERVER (a meglévő weboldarra mehet) AMI KEZELI A BIZTONSÁGOS OPENAI GENERÁLOSOKAT API KULCSOKAT,
-    - új ikon szín fekete-sárga
-    - Súgót átdolgozni
+    - Előbb szürje be a leveleket minhogy betöltse (no-reply, spam, stb)
     - Login view felvillan hiába vagyok bejelentkezve
     - Saját nsis telepítő kliens
+    - Súgót átdolgozni
 Ráér:  
     - Lehessen több emailel bejelentkezni, úgymint a thunderbirdnél (Fiókok aloldal)
     - Át állni céges (openai, github, vercel) fiókokra
