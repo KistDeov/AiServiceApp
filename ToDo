@@ -1,11 +1,12 @@
 Fontos:
-    - KELL EGY TELJESN  ÚJ SZERVER (a meglévő weboldarra mehet) AMI KEZELI A BIZTONSÁGOS OPENAI GENERÁLOSOKAT API KULCSOKAT
-    - Félautomata válaszadás
+    - KELL EGY TELJESN  ÚJ SZERVER (a meglévő weboldarra mehet) AMI KEZELI A BIZTONSÁGOS OPENAI GENERÁLOSOKAT API KULCSOKAT,
+    - Trial verzióit adatbázisból töltsd be a meglévő hátralévő levél generálásokat (generated.json ból számolja, az automata válasz is oda tegye bele), írja is valahol, hogy mennyi generálás van hátra
+    - Trial verzió 100 generálás és licenc aktiválástól kezdve 90 nap ezeket írja a főoldalon!
     - új ikon szín fekete-sárga
     - Saját nsis telepítő kliens
-Ráér:  
+    - Súgót átdolgozni
     - Login view felvillan hiába vagyok bejelentkezve
-    - Be lehessen állítani, hogy melyik email-címekre válaszoljon 
+Ráér:  
     - Lehessen több emailel bejelentkezni, úgymint a thunderbirdnél (Fiókok aloldal)
     - Át állni céges (openai, github, vercel) fiókokra
     - Please review for production readiness check for common vulnerabilities, secure headers, forms, input validation, authentication, error handling, debug statements, dependency security, and ensure adherence to industry best practices.

@@ -1,5 +1,6 @@
 import React from "react";
-import { Box, Typography, CircularProgress, Button } from "@mui/material";
+import { Box, Typography, Button } from "@mui/material";
+import CenteredLoading from './CenteredLoading';
 
 const UpdateView = () => {
   return (
@@ -21,7 +22,7 @@ const UpdateView = () => {
       <Typography variant="body1">
         Ez eltarthat néhány másodpercig. Kérjük, NE zárd be az alkalmazást!
       </Typography>
-      <CircularProgress size={60} sx={{ mb: 3 }} />
+  <CenteredLoading size={60} />
     </Box>
   );
 };

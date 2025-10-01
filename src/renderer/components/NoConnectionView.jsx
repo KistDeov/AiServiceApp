@@ -1,6 +1,7 @@
-import { Box, Typography, Button, CircularProgress } from "@mui/material";
+import { Box, Typography, Button } from "@mui/material";
 import { FiWifiOff } from "react-icons/fi";
 import React, { useState } from "react";
+import CenteredLoading from './CenteredLoading';
 
 const NoConnectionView = ({ onRetry }) => {
   const [loading, setLoading] = useState(false);
@@ -14,6 +15,8 @@ const NoConnectionView = ({ onRetry }) => {
       setLoading(false);
     }
   };
+
+  if (loading) return <CenteredLoading size={48} text={'Ellenőrzés...'} />;
 
   return (
     <Box sx={{ mt: 32, textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -30,7 +33,7 @@ const NoConnectionView = ({ onRetry }) => {
           onClick={handleRetry}
           disabled={loading}
         >
-          {loading ? <CircularProgress size={22} /> : 'Próbáld újra'}
+          {loading ? <CenteredLoading size={22} text={'...'} /> : 'Próbáld újra'}
         </Button>
       </Box>
     </Box>

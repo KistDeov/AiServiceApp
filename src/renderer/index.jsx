@@ -47,7 +47,7 @@ import UpdateView from "./components/UpdateView.jsx";
 import UpdateReadyView from "./components/UpdateReadyView.jsx";
 import LicenceActivationView from './components/LicenceActivationView.jsx';
 import SheetEditorView from './components/SheetEditorView';
-//import GeneratedMailsView from "./components/GeneratedMailsView.jsx";
+import GeneratedMailsView from "./components/GeneratedMailsView.jsx";
 import { FaRegQuestionCircle, FaBars, FaThumbtack, FaHome, FaEnvelope, FaDatabase, FaRobot, FaCog, FaSignOutAlt, FaPowerOff, FaUserFriends } from 'react-icons/fa';
 import { FaEnvelopeCircleCheck } from "react-icons/fa6";
 import { BsFillEnvelopeArrowUpFill } from "react-icons/bs";
@@ -739,13 +739,13 @@ const App = () => {
     switch (activeView) {
       case 'updateAvailable': return <UpdateView />;
       case 'updateReady': return <UpdateReadyView onClose={() => { setActiveView(''); setUpdateStatus(''); }} />;
-      //case 'generatedMails': return <GeneratedMailsView />;
+  case 'generatedMails': return <GeneratedMailsView showSnackbar={showSnackbar} />;
       case 'mails': return <MailsView showSnackbar={showSnackbar} />;
       case 'sentMails': return <SentMailsView showSnackbar={showSnackbar} />;
       case 'mailStructure': return <MailStructureView showSnackbar={showSnackbar} />;
       case 'settings': return <SettingsView themeName={themeName} setThemeName={setThemeName} onAutoSendChanged={setAutoSend} onHalfAutoSendChanged={setHalfAuto} />;
       case 'import': return <ImportFileView showSnackbar={showSnackbar} />;
-  case 'sheet-editor': return <SheetEditorView showSnackbar={showSnackbar} />;
+      case 'sheet-editor': return <SheetEditorView showSnackbar={showSnackbar} />;
       case 'prompt': return <PromptView showSnackbar={showSnackbar} />;
       case 'help': return <HelpView showSnackbar={showSnackbar} />;
       default: return <HomeView showSnackbar={showSnackbar} reloadKey={activeView} />;
@@ -939,9 +939,9 @@ const App = () => {
           <IconButton onClick={() => setActiveView('sentMails')} color={activeView === 'sentMails' ? 'default' : 'inherit'} sx={{ color: 'text.primary' }}>
             <FaEnvelopeCircleCheck size={27} />
           </IconButton>
-          {/*<IconButton onClick={() => setActiveView('generatedMails')} color={activeView === 'generatedMails' ? 'default' : 'inherit'} sx={{ color: 'text.primary' }}>
+          <IconButton onClick={() => setActiveView('generatedMails')} color={activeView === 'generatedMails' ? 'default' : 'inherit'} sx={{ color: 'text.primary' }}>
             <BsFillEnvelopeArrowUpFill size={22} />
-          </IconButton>*/}
+          </IconButton>
           <IconButton onClick={() => setActiveView('mailStructure')} color={activeView === 'mailStructure' ? 'default' : 'inherit'} sx={{ color: 'text.primary' }}>
             <IoMdConstruct size={22} />
           </IconButton>
@@ -1108,11 +1108,11 @@ const App = () => {
                       <ListItemText primary="Elküldött levelek" />
                     </ListItemButton>
                   </ListItem>
-                  {/*<ListItem disablePadding>
+                  <ListItem disablePadding>
                     <ListItemButton selected={activeView === 'generatedMails'} onClick={() => setActiveView('generatedMails')}>
                       <ListItemText primary="Előkészített levelek" />
                     </ListItemButton>
-                  </ListItem>*/}
+                  </ListItem>
                   <ListItem disablePadding>
                     <ListItemButton selected={activeView === 'mailStructure'} onClick={() => setActiveView('mailStructure')}>
                       <ListItemText primary="Levél szerkezet" />

@@ -3,7 +3,6 @@ import {
   Box,
   Typography,
   Paper,
-  CircularProgress,
   FormControlLabel,
   FormGroup,
   Switch,
@@ -19,6 +18,7 @@ import {
   Grid,
   Divider
 } from '@mui/material';
+import CenteredLoading from './components/CenteredLoading';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 // Note: removed unused import
@@ -196,6 +196,15 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
       setMaxEmailDate(maxDate || "");
       setNotifyOnAutoReply(notify || false);
       setNotificationEmail(email || "");
+      // If both modes are enabled by stored settings, prefer automatic mode and turn off half-automatic.
+      // This ensures mutual exclusivity in the UI and persisted config.
+      if (autoSendVal && halfAutoVal) {
+        setHalfAuto(false);
+        window.api.setHalfAuto && window.api.setHalfAuto(false);
+        window.global.halfAuto = false;
+        halfAutoVal = false;
+      }
+
       setLoading(false);
       window.global.autoSend = autoSendVal;
       window.global.halfAuto = halfAutoVal;
@@ -234,18 +243,25 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
       if (onAutoSendChanged) onAutoSendChanged(true); // <-- EZ ITT A LÉNYEG
       window.api.onAutoSendChanged && window.api.onAutoSendChanged(true);
     });
+    // If half-auto was enabled, turn it off to keep modes exclusive
+    if (halfAuto) {
+      setHalfAuto(false);
+      window.api.setHalfAuto && window.api.setHalfAuto(false);
+      window.global.halfAuto = false;
+      if (onHalfAutoSendChanged) onHalfAutoSendChanged(false);
+      window.api.onHalfAutoSendChanged && window.api.onHalfAutoSendChanged(false);
+    }
 
     if (!timedAutoSend) {
-
-    setStartTime("00:00");
-    setEndTime("23:59");
-    window.api.setAutoSendTimes({
-      startTime: "00:00",
-      endTime: "23:59"
-    });
-  } else {
-    window.api.setTimedAutoSend && window.api.setTimedAutoSend(timedAutoSend);
-  }
+      setStartTime("00:00");
+      setEndTime("23:59");
+      window.api.setAutoSendTimes({
+        startTime: "00:00",
+        endTime: "23:59"
+      });
+    } else {
+      window.api.setTimedAutoSend && window.api.setTimedAutoSend(timedAutoSend);
+    }
   
     setShowConfirmDialog(false);
     setPendingAutoSend(false);
@@ -278,6 +294,14 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
       if (onHalfAutoSendChanged) onHalfAutoSendChanged(true); // <-- EZ ITT A LÉNYEG
       window.api.onHalfAutoSendChanged && window.api.onHalfAutoSendChanged(true);
     });
+    // If full auto was enabled, turn it off to keep modes exclusive
+    if (autoSend) {
+      setAutoSend(false);
+      window.api.setAutoSend && window.api.setAutoSend(false);
+      window.global.autoSend = false;
+      if (onAutoSendChanged) onAutoSendChanged(false);
+      window.api.onAutoSendChanged && window.api.onAutoSendChanged(false);
+    }
 
     setShowHalfAutoConfirmDialog(false);
     setPendingHalfAuto(false);
@@ -339,7 +363,7 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
   };
 
   if (loading) {
-    return <CircularProgress />;
+    return <CenteredLoading />;
   }
 
   return (
@@ -394,8 +418,8 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
                       <Divider sx={{ mb: 2 }} />
 
                       <FormGroup>
-                        <FormControlLabel control={<Switch sx={{ ml: 1 }} checked={autoSend || pendingAutoSend} onChange={handleAutoSendChange} />} label="Automatikus válaszküldés" />
-
+                        <FormControlLabel control={<Switch sx={{ ml: 1 }} checked={autoSend || pendingAutoSend} onChange={handleAutoSendChange} disabled={halfAuto || pendingHalfAuto} />} label="Automatikus válaszküldés" />
+                        <FormControlLabel control={<Switch sx={{ ml: 1 }} checked={halfAuto || pendingHalfAuto} onChange={handleHalfAutoSendChange} disabled={autoSend || pendingAutoSend} />} label="Félautomata válaszküldés" />
                         <Box sx={{ mt: 2 }}>
                           <FormControlLabel control={<Switch sx={{ ml: 1 }} checked={notifyOnAutoReply} onChange={handleNotifyOnAutoReplyChange} />} label="Értesítés küldése automatikus válasz esetén" />
                           {notifyOnAutoReply && (
@@ -403,6 +427,7 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
                           )}
                         </Box>
                       </FormGroup>
+                      
                     </Box>
                   </Paper>
                 </Grid>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Paper, CircularProgress, Button, TextField } from '@mui/material';
+import { Box, Typography, Paper, Button, TextField } from '@mui/material';
+import CenteredLoading from './CenteredLoading';
 
 const MailsView = ({ showSnackbar }) => {
   const [emails, setEmails] = useState([]);
@@ -126,7 +127,7 @@ const MailsView = ({ showSnackbar }) => {
 
   console.log('Filtered emails for display:', filteredEmails);
 
-  if (loading) return <CircularProgress />;
+  if (loading) return <CenteredLoading />;
 
   if (selectedEmail) {
     return (
@@ -142,7 +143,7 @@ const MailsView = ({ showSnackbar }) => {
       >
         <Typography variant="h5" gutterBottom>Levelezés részletei</Typography>
         {loadingFull || !fullEmail ? (
-          <CircularProgress />
+          <CenteredLoading size={48} text={'Betöltés...'} />
         ) : (replyMode || generatedMode) ? (
           <>
             <Typography><strong>Válasz a következő címzettnek:</strong> {fullEmail.from}</Typography>

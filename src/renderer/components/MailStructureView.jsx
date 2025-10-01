@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Paper, Typography, Box, CircularProgress } from '@mui/material';
+import { Paper, Typography, Box } from '@mui/material';
+import CenteredLoading from './CenteredLoading';
 
 const MailStructureView = () => {
   const [loading, setLoading] = useState(true);
@@ -30,7 +31,7 @@ const MailStructureView = () => {
   const body = 'Ez egy teszt e-mail törzsszöveg, amely bemutatja, hogyan jelenik meg az Ai által megszerkesztett levél. Ez a rész a levél tartalma, amit az Ai írt.';
 
   if (loading) {
-    return <Box sx={{ display: 'flex', justifyContent: 'center', mt: 8 }}><CircularProgress /></Box>;
+    return <CenteredLoading />;
   }
 
   return (

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Paper, CircularProgress, IconButton } from '@mui/material';
+import { Box, Typography, Paper, IconButton } from '@mui/material';
 import { FaArrowCircleRight } from "react-icons/fa";
 import ReplyStatsChart from './ReplyStatsChart';
+import CenteredLoading from './CenteredLoading';
 
 const HomeView = ({ showSnackbar, reloadKey }) => {
   const [unreadEmails, setUnreadEmails] = useState([]);
@@ -9,6 +10,7 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
   const [userEmail, setUserEmail] = useState('');
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsData, setStatsData] = useState([]);
+  const [halfAuto, setHalfAuto] = useState(false);
 
   const handleViewChange = (view) => {
     window.api.setView(view);
@@ -20,11 +22,13 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
     });
     Promise.all([
       window.api.getUnreadEmails(),
-      window.api.getUserEmail()
+      window.api.getUserEmail(),
+      window.api.getHalfAutoSend()
     ])
-      .then(([emails, email]) => {
+      .then(([emails, email, halfAutoVal]) => {
         setUnreadEmails(emails);
-        setUserEmail(email.split('@')[0]);
+        setUserEmail((email || '').split('@')[0]);
+        setHalfAuto(Boolean(halfAutoVal));
         setLoading(false);
       })
       .catch(err => {
@@ -59,7 +63,7 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
   if (loading) {
     return (
       <Paper sx={{ p: 4 }}>
-        <CircularProgress />
+        <CenteredLoading />
       </Paper>
     );
   }
@@ -77,10 +81,18 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
             <FaArrowCircleRight />
         </IconButton>
       </Typography>
+      {halfAuto && (
+        <Typography variant="body1" sx={{ mt: 2 }}>
+          {unreadEmails.length > 0 
+            ? `${unreadEmails.length} db előkészített leveled van.`
+            : 'Nincs Előkészített leveled'}
+          <IconButton onClick={() => handleViewChange('generatedMails')} size="large" sx={{ ml: 1, color: 'primary.main' }}>
+              <FaArrowCircleRight />
+          </IconButton>
+        </Typography>
+      )}
       {statsLoading ? (
-        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
-          <CircularProgress />
-        </Box>
+        <CenteredLoading size={40} text={'Betöltés...'} />
       ) : (
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', mt: 4, mb: 1 }}>
           <ReplyStatsChart data={statsData} width={300} height={100} />

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Paper, CircularProgress, Button, TextField, Tabs, Tab, Grid, Stack } from '@mui/material';
+import { Box, Typography, Paper, Button, TextField, Tabs, Tab, Grid, Stack } from '@mui/material';
+import CenteredLoading from './CenteredLoading';
 
 const PromptView = ({ showSnackbar }) => {
   const [greeting, setGreeting] = useState('');
@@ -271,6 +272,8 @@ const PromptView = ({ showSnackbar }) => {
     }
   };
 
+  if (loading) return <CenteredLoading />;
+
   return (
     <Paper sx={{ p: 4, maxHeight: '85vh', height: '85vh', overflowY: 'auto' }}>
       <Tabs value={section} onChange={(e, val) => setSection(val)} variant="standard" centered sx={{ mb: 2 }}>
@@ -468,7 +471,7 @@ const PromptView = ({ showSnackbar }) => {
               <Box sx={{ mt: 2 }}>
                 <Typography variant="subtitle1" sx={{ mb: 1 }}>Feltöltött csatolmányok:</Typography>
                 {attachmentsLoading ? (
-                  <CircularProgress size={24} />
+                  <CenteredLoading size={28} text={'Betöltés...'} />
                 ) : attachments.length === 0 ? (
                   <Typography>Nincs csatolmány feltöltve.</Typography>
                 ) : (

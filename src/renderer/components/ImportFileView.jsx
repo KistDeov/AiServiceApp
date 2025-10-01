@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, Paper, CircularProgress, Button, TextField, IconButton, List, ListItem, ListItemText, Tabs, Tab } from '@mui/material';
+import SheetEditorView from './SheetEditorView';
 import { MdDelete } from 'react-icons/md';
 
 const ImportFileView = ({ showSnackbar }) => {
@@ -113,12 +114,7 @@ const ImportFileView = ({ showSnackbar }) => {
             console.error('Unable to get excel path after upload', e);
           }
         }
-        // Open the sheet editor so the user can edit the uploaded Excel
-        try {
-          window.api.setView?.('sheet-editor');
-        } catch (e) {
-          console.error('Failed to open sheet editor', e);
-        }
+       
       } else {
         showSnackbar(`Hiba történt a feltöltés során: ${uploadResult.error}`, 'error');
       }
@@ -255,21 +251,36 @@ const ImportFileView = ({ showSnackbar }) => {
 
   // open the dedicated sheet editor view
   const openSheetEditor = () => {
-    window.api.setView('sheet-editor');
+    // open the sheet editor inline under the same tab UI instead of switching the whole app view
+    setSection('editor');
   };
+
+  // when the user navigates to the editor tab, automatically open the sheet editor if an excel exists
+  useEffect(() => {
+    if (section === 'editor') {
+      if (excelExists) {
+        try {
+          // editor is embedded in this component now; no app-level view switch required
+        } catch (e) {
+          console.error('Failed to open sheet editor on tab change', e);
+        }
+      }
+    }
+  }, [section, excelExists]);
 
   return (
     <Paper sx={{ p: 4 }}>
       <Tabs value={section} onChange={(e, val) => setSection(val)} variant="standard" centered sx={{ mb: 2 }}>
         <Tab label="Weboldalak" value="websites" />
-        <Tab label="Excel feltöltés" value="excel" />
+        <Tab label="Adatbázis feltöltés" value="excel" />
+        <Tab label="Adatbázis szerkesztés" value="editor" />
       </Tabs>
 
       <Box>
         {section === 'websites' && (
           <Paper variant="outlined" sx={{ p: 4, bgcolor: '#181818', color: 'white', borderRadius: 1, boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
-            <Typography variant="h4" gutterBottom sx={{ color: 'white', textAlign: 'center' }}>Weboldalak megadása</Typography>
-            <Typography variant="h8" gutterBottom sx={{ color: 'rgba(255,255,255,0.75)', textAlign: 'center' }}>Itt megadhatod a vállalkozásod, céged weboldalait, hogy az AI megértse mivel foglalkozik a céged, ezzel segítve a pontosabb válaszadást.</Typography>
+            <Typography variant="h5" gutterBottom sx={{ color: 'white', textAlign: 'center' }}>Weboldalak megadása</Typography>
+            <Typography variant="h8" gutterBottom sx={{ color: 'rgba(255,255,255,0.75)', textAlign: 'center', ml: 8 }}>Itt megadhatod a vállalkozásod, céged weboldalait, hogy az AI megértse mivel foglalkozik a céged, ezzel segítve a pontosabb válaszadást.</Typography>
 
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, mt: 2 }}>
               <TextField
@@ -310,8 +321,8 @@ const ImportFileView = ({ showSnackbar }) => {
 
         {section === 'excel' && (
           <Paper variant="outlined" sx={{ p: 4, mt: 1, bgcolor: '#181818', color: 'white', borderRadius: 1, boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
-            <Typography variant="h4" gutterBottom sx={{ color: 'white', textAlign: 'center' }}>Adatbázis importálása</Typography>
-            <Typography variant="h8" gutterBottom sx={{ color: 'rgba(228, 125, 0, 1)', textAlign: 'center' }}>Az adatok az AI-nak lesznek átadva. Ne adjon meg semmilyen olyan kényes adatot, amit az interneten sem osztana meg!</Typography>
+            <Typography variant="h5" gutterBottom sx={{ color: 'white', textAlign: 'center' }}>Adatbázis importálása</Typography>
+            <Typography variant="h8" gutterBottom sx={{ color: 'rgba(228, 125, 0, 1)', textAlign: 'center', ml: 15 }}>Az adatok az AI-nak lesznek átadva. Ne adjon meg semmilyen olyan kényes adatot, amit az interneten sem osztana meg!</Typography>
 
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 3 }}>
               <Button
@@ -356,16 +367,6 @@ const ImportFileView = ({ showSnackbar }) => {
                 </Paper>
               )}
 
-              {excelExists && (
-                <Button
-                  variant="outlined"
-                  onClick={openSheetEditor}
-                  disabled={loading}
-                  sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)', mt: 2 }}
-                >
-                  Megnyitás szerkesztésre
-                </Button>
-              )}
               {(originalUploadedFileName || uploadedFileName) && (
                 <Box sx={{ mt: 2, maxWidth: 640, textAlign: 'center' }}>
                   <Typography sx={{ color: 'rgba(255,255,255,0.75)', wordBreak: 'break-all' }}>
@@ -375,6 +376,11 @@ const ImportFileView = ({ showSnackbar }) => {
               )}
             </Box>
           </Paper>
+        )}
+
+        {section === 'editor' && (
+          // render the full SheetEditorView inline so the tab doesn't switch the whole app view
+          <SheetEditorView showSnackbar={showSnackbar} embedded onClose={() => setSection('excel')} />
         )}
       </Box>
     </Paper>

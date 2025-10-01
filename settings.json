@@ -14,6 +14,8 @@
   "maxEmailDate": "",
   "notifyOnAutoReply": false,
   "notificationEmail": "",
-  "webUrls": [],
+  "webUrls": [
+    "https://robotikapecs.hu/"
+  ],
   "halfAutoSend": true
 }

@@ -1023,7 +1023,11 @@ ipcMain.handle('save-excel-file', async (event, payload) => {
         ws.addRow(row);
       });
     }
-    const targetPath = findFile("adatok.xlsx");
+    // Always write the saved workbook to the userData folder so the renderer
+    // reading logic (which prefers the userData copy) sees the updated file.
+    const userDataDir = app.getPath('userData');
+    if (!fs.existsSync(userDataDir)) fs.mkdirSync(userDataDir, { recursive: true });
+    const targetPath = path.join(userDataDir, 'adatok.xlsx');
     await workbook.xlsx.writeFile(targetPath);
     return { success: true };
   } catch (error) {
@@ -1144,7 +1148,7 @@ async function generateReply(email) {
       .replace('{webUrls}', combinedHtml || 'N/A');
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o-mini",
       messages: [
         { 
           role: "system", 

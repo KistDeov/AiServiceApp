@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Paper, CircularProgress, Button, TextField } from '@mui/material';
+import { Box, Typography, Paper, Button, TextField } from '@mui/material';
+import CenteredLoading from './CenteredLoading';
 import { useTheme } from '@mui/material/styles';
 
 const SentMailsView = ({ showSnackbar }) => {
@@ -34,7 +35,7 @@ const SentMailsView = ({ showSnackbar }) => {
     );
   });
 
-  if (loading) return <CircularProgress />;
+  if (loading) return <CenteredLoading />;
 
   if (selectedEmail) {
     // Split the body into reply and original message

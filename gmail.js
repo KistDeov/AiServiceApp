@@ -2,6 +2,7 @@ import { authorize } from './src/backend/auth.js';
 import { google } from 'googleapis';
 import { htmlToText } from 'html-to-text';
 import axios from 'axios';
+import { getSecret } from './src/utils/keytarHelper.js';
 
 function decodeRFC2047(subject) {
   return subject.replace(/=\?([^?]+)\?([BbQq])\?([^?]+)\?=/g, (match, charset, encoding, text) => {
