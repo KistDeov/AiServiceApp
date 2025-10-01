@@ -11,19 +11,19 @@ const TutorialView = ({ onSkip }) => {
   const [reachedLastPage, setReachedLastPage] = useState(false);
 
   // Oldalak szövegei
-  const pages = [
+   const pages = [
     `Üdvözlünk az Ai Mail alkalmazásban!
 
 Ez az alkalmazás segít automatizálni az e-mailek kezelését és válaszadását mesterséges intelligencia segítségével. 
 A fő funkciók:
 - Bejelentkezés Gmail vagy saját SMTP fiókkal
 - Beérkezett és elküldött levelek áttekintése
-- Automatikus vagy kézi válasz generálás AI-val
-- Saját megszólítás, aláírás és céges logó beállítása
-- Excel adatbázis feltöltése, amelyet az AI a válaszokban felhasznál
+- Automatikus, Félautomata vagy kézi válasz generálás AI-val
+- Saját megszólítás, üdvözlés, aláírás és céges logó beállítása
+- Excel adatbázis feltöltése, szerkesztése amelyet az AI a válaszokban felhasznál
 - Csatolmányok kezelése, képek automatikus felismerése
 
-A bal oldali menüben választhatsz a főoldal, levelek, elküldött levelek, adatbázis, AI szöveg, beállítások és súgó között.`,
+A bal oldali menüben választhatsz a főoldal,  beérkezett levelek, elküldött levelek, előkészített levelek,  AI adatbázis, AI tanítás, beállítások és súgó között.`,
 
     `Bejelentkezés és levelek kezelése
 
@@ -31,22 +31,21 @@ A bal oldali menüben választhatsz a főoldal, levelek, elküldött levelek, ad
 2. Sikeres bejelentkezés után a főoldalon látod a válaszra váró leveleket és statisztikákat.
 3. A "Beérkezett levelek" menüpontban megtekintheted a leveleket, válaszolhatsz rájuk kézzel vagy AI-generált válasszal.
 4. Az "Elküldött levelek" menüpontban visszanézheted a korábbi válaszaidat.
-5. Az "Adatbázis" menüpontban Excel fájlt tölthetsz fel, amelyből az AI információkat használhat fel a válaszokhoz.
-6. Az "AI szöveg" menüpontban testreszabhatod a megszólítást, aláírást, céges logót, és kezelheted a csatolmányokat.
+5. Az "AI adatbázis" menüpontban Excel fájlt és weboldalak linkjeit töltheted fel és szerkesztheted, amelyekből az AI információkat használhat fel a válaszokhoz.
+6. Az "AI tanítás" menüpontban testreszabhatod a megszólítást, üdvözlést, aláírást, céges logót, és kezelheted a csatolmányokat.
 
 A beállításokban módosíthatod a témát, automatikus válaszidőszakot, tiltott címeket és a megjelenítési módot is.`,
 
     `Fontos tudnivalók és tippek
 
 - Az automatikus válaszküldés csak a beállított időablakban aktív, és a tiltott címekre nem válaszol.
+- A félautomata mód lehetővé teszi, hogy az AI által javasolt válaszokat szerkesztve küldhesd el.
 - Az Excel adatbázis feltöltése felülírja a korábbit, és minden munkalap adatait felhasználja az AI.
 - A csatolmányok maximális mérete 25 MB, képek esetén az AI automatikusan leírást generál.
 - A beállítások és adatok helyileg, a saját gépeden tárolódnak.
-- 100 elküldött levél után a próbaidőszak véget ér, és előfizetés szükséges a további használathoz.
+- 100 AI által generált levél vagy 90 nap után a próbaidőszak véget ér, és előfizetés szükséges a további használathoz.
 
-További információkért keresd fel a https://okosmail.hu weboldalt vagy nézd meg a Súgó menüpontot!
-
-Sikeres használatot kíván az Ai Mail csapata!`
+További információkért keresd fel a https://okosmail.hu weboldalt vagy nézd meg a Súgó menüpontot!`
   ];
 
   //Kihagyás és tovább
