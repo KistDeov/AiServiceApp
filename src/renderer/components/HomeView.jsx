@@ -14,31 +14,86 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
   const [trialEndDate, setTrialEndDate] = useState(null);
   const [remainingGenerations, setRemainingGenerations] = useState(null);
   const [timeLeftStr, setTimeLeftStr] = useState('');
+  const [ignoredEmails, setIgnoredEmails] = useState([]);
+  const [repliedEmailIds, setRepliedEmailIds] = useState(new Set());
+
+  const ignoredPatterns = ['no-reply', 'noreply', 'spam', 'do-not-reply'];
+
+  function isEmailIgnored(email) {
+    if (!email) return false;
+    const from = (email.from || '').toLowerCase();
+    const subject = (email.subject || '').toLowerCase();
+
+    for (const p of ignoredPatterns) {
+      if (from.includes(p) || subject.includes(p)) return true;
+    }
+
+    for (const ig of ignoredEmails) {
+      const item = (ig || '').toLowerCase().trim();
+      if (!item) continue;
+      if (item.includes('@')) {
+        if (from.includes(item)) return true;
+      } else {
+        if (from.includes(item) || subject.includes(item)) return true;
+      }
+    }
+    return false;
+  }
 
   const handleViewChange = (view) => {
     window.api.setView(view);
   }
 
   useEffect(() => {
-    window.api.onEmailsUpdated((newEmails) => {
-      setUnreadEmails(newEmails);
-    });
+    // Load ignored emails and replied ids first so counts can be filtered correctly
     Promise.all([
-      window.api.getUnreadEmails(),
-      window.api.getUserEmail(),
-      window.api.getHalfAutoSend()
-    ])
-      .then(([emails, email, halfAutoVal]) => {
-        setUnreadEmails(emails);
-        setUserEmail((email || '').split('@')[0]);
-        setHalfAuto(Boolean(halfAutoVal));
-        setLoading(false);
-      })
+      window.api.getIgnoredEmails(),
+      window.api.getRepliedEmailIds?.(),
+    ]).then(([ignoredList, repliedIds]) => {
+      setIgnoredEmails(Array.isArray(ignoredList) ? ignoredList : []);
+      try {
+        const setIds = new Set(Array.isArray(repliedIds) ? repliedIds : []);
+        setRepliedEmailIds(setIds);
+      } catch (e) {
+        setRepliedEmailIds(new Set());
+      }
+
+      // Subscribe to updates AFTER we've loaded ignore/replied lists
+      window.api.onEmailsUpdated((newEmails) => {
+        const filtered = (newEmails || []).filter(e => !repliedEmailIds.has(e.id) && !isEmailIgnored(e));
+        setUnreadEmails(filtered);
+      });
+
+      Promise.all([
+        window.api.getUnreadEmails(),
+        window.api.getUserEmail(),
+        window.api.getHalfAutoSend()
+      ])
+        .then(([emails, email, halfAutoVal]) => {
+          const filtered = (emails || []).filter(e => !repliedEmailIds.has(e.id) && !isEmailIgnored(e));
+          setUnreadEmails(filtered);
+          setUserEmail((email || '').split('@')[0]);
+          setHalfAuto(Boolean(halfAutoVal));
+          setLoading(false);
+        })
       .catch(err => {
         console.error('Hiba az adatok lekérésekor:', err);
         setLoading(false);
         showSnackbar('Hiba az adatok lekérésekor', 'error');
       });
+    }).catch(err => {
+      console.warn('Could not load ignored/replied lists:', err);
+      // Fallback: behave as before
+      window.api.onEmailsUpdated((newEmails) => setUnreadEmails(newEmails));
+      window.api.getUnreadEmails()
+        .then(([emails]) => {
+          setUnreadEmails(emails);
+          setLoading(false);
+        })
+        .catch(e => { setLoading(false); });
+
+    });
+
     return () => {
       window.api.removeEmailsUpdateListener();
     };

@@ -13,31 +13,53 @@ const MailsView = ({ showSnackbar }) => {
   const [replySubject, setReplySubject] = useState('');
   const [replyBody, setReplyBody] = useState('');
   const [repliedEmailIds, setRepliedEmailIds] = useState(new Set());
+  const [ignoredEmails, setIgnoredEmails] = useState([]);
   const [search, setSearch] = useState('');
 
+  // Built-in patterns we want to auto-ignore in addition to user-provided list
+  const ignoredPatterns = ['no-reply', 'noreply', 'spam', 'do-not-reply'];
+
   useEffect(() => {
-    window.api.onEmailsUpdated((newEmails) => {
-      let repliedSet = new Set(repliedEmailIds);
-      const filtered = newEmails.filter(email => !repliedSet.has(email.id));
-      console.log('Updated emails:', newEmails);
-      console.log('Filtered emails:', filtered);
-      setEmails(filtered);
-    });
-    window.api.getUnreadEmails()
-      .then(async (data) => {
-        let repliedSet = new Set();
-        setLoading(false);
-        const filtered = data.filter(email => !repliedSet.has(email.id));
-        console.log('Fetched unread emails:', data);
-        console.log('Filtered unread emails:', filtered);
-        setRepliedEmailIds(repliedSet);
-        setEmails(filtered);
+    // Load ignored emails (user-defined) first so our initial filtering can use them
+    window.api.getIgnoredEmails()
+      .then(list => setIgnoredEmails(Array.isArray(list) ? list : []))
+      .catch(err => {
+        console.warn('Could not load ignored emails:', err);
+        setIgnoredEmails([]);
       })
+      .finally(() => {
+        // Subscribe to update events
+        window.api.onEmailsUpdated((newEmails) => {
+          let repliedSet = new Set(repliedEmailIds);
+          const filtered = newEmails.filter(email => !repliedSet.has(email.id) && !isEmailIgnored(email));
+          console.log('Updated emails:', newEmails);
+          console.log('Filtered emails:', filtered);
+          setEmails(filtered);
+
+          // If the currently selected email is no longer present after filtering, clear selection
+          if (selectedEmail && !filtered.find(e => e.id === selectedEmail.id)) {
+            setSelectedEmail(null);
+            setFullEmail(null);
+          }
+        });
+
+        window.api.getUnreadEmails()
+          .then(async (data) => {
+            let repliedSet = new Set();
+            setLoading(false);
+            const filtered = data.filter(email => !repliedSet.has(email.id) && !isEmailIgnored(email));
+            console.log('Fetched unread emails:', data);
+            console.log('Filtered unread emails:', filtered);
+            setRepliedEmailIds(repliedSet);
+            setEmails(filtered);
+          })
       .catch(err => {
         console.error('Hiba az emailek lekérésekor:', err);
         setLoading(false);
         showSnackbar('Hiba az emailek lekérésekor', 'error');
       });
+      });
+
     return () => {
       window.api.removeEmailsUpdateListener();
     };
@@ -48,6 +70,14 @@ const MailsView = ({ showSnackbar }) => {
       setLoadingFull(true);
       window.api.getEmailById(selectedEmail.id)
         .then((data) => {
+          // If the retrieved full email now matches ignore rules, don't keep it open
+          if (isEmailIgnored(data)) {
+            showSnackbar('A levél szűrőbe esik (pl. no-reply/spam) és nem tölthető be.', 'info');
+            setSelectedEmail(null);
+            setFullEmail(null);
+            setLoadingFull(false);
+            return;
+          }
           setFullEmail(data);
           setLoadingFull(false);
         })
@@ -58,6 +88,28 @@ const MailsView = ({ showSnackbar }) => {
         });
     }
   }, [selectedEmail]);
+
+  // Helper: decide if an email should be ignored based on builtin patterns and user list
+  function isEmailIgnored(email) {
+    if (!email) return false;
+    const from = (email.from || '').toLowerCase();
+    const subject = (email.subject || '').toLowerCase();
+
+    for (const p of ignoredPatterns) {
+      if (from.includes(p) || subject.includes(p)) return true;
+    }
+
+    for (const ig of ignoredEmails) {
+      const item = (ig || '').toLowerCase().trim();
+      if (!item) continue;
+      if (item.includes('@')) {
+        if (from.includes(item)) return true;
+      } else {
+        if (from.includes(item) || subject.includes(item)) return true;
+      }
+    }
+    return false;
+  }
 
   const handleSendReply = () => {
     if (!fullEmail) return;
@@ -245,7 +297,19 @@ const MailsView = ({ showSnackbar }) => {
                 cursor: 'pointer',
                 '&:hover': { backgroundColor: '#2a1e3a' }
               }}
-              onClick={() => setSelectedEmail(email)}
+                  onClick={() => {
+                    // Prevent selecting emails that will be filtered out (no-reply, spam, user-ignored)
+                    if (isEmailIgnored(email)) {
+                      showSnackbar('Ez a levél szűrőbe esik és nem nyitható meg.', 'info');
+                      return;
+                    }
+                    // Also prevent selecting already replied ones
+                    if (repliedEmailIds.has(email.id)) {
+                      showSnackbar('Ez az üzenet már meg lett válaszolva.', 'info');
+                      return;
+                    }
+                    setSelectedEmail(email);
+                  }}
             >
               <Typography><strong>Feladó:</strong> {email.from}</Typography>
               <Typography><strong>Tárgy:</strong> {email.subject}</Typography>
