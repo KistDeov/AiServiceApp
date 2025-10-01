@@ -467,6 +467,8 @@ const App = () => {
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // Indicates whether we've completed the initial async auth check
+  const [authChecked, setAuthChecked] = useState(false);
   const [isLeftNavbarOn, setIsLeftNavbarOn] = useState(true);
   const [isPinned, setIsPinned] = useState(true); // alapból true
   const [drawerOpen, setDrawerOpen] = useState(true); // alapból true
@@ -557,12 +559,16 @@ const App = () => {
           setEmailProvider(null);
           setUserEmail(''); // ÚJ: email törlése
         }
+        // Mark that we've finished checking auth (success path)
+        setAuthChecked(true);
       })
       .catch(error => {
         console.error('Hiba az authentikáció ellenőrzésekor:', error);
         setIsAuthenticated(false);
         setEmailProvider(null);
         setUserEmail(''); // ÚJ: email törlése
+        // Mark that we've finished checking auth (error path)
+        setAuthChecked(true);
       });
   }, []);
 
@@ -738,8 +744,8 @@ const App = () => {
   const renderView = () => {
     switch (activeView) {
       case 'updateAvailable': return <UpdateView />;
-      case 'updateReady': return <UpdateReadyView onClose={() => { setActiveView(''); setUpdateStatus(''); }} />;
-  case 'generatedMails': return <GeneratedMailsView showSnackbar={showSnackbar} />;
+  case 'updateReady': return <UpdateReadyView onClose={() => { setActiveView('home'); setUpdateStatus(''); }} />;
+      case 'generatedMails': return <GeneratedMailsView showSnackbar={showSnackbar} />;
       case 'mails': return <MailsView showSnackbar={showSnackbar} />;
       case 'sentMails': return <SentMailsView showSnackbar={showSnackbar} />;
       case 'mailStructure': return <MailStructureView showSnackbar={showSnackbar} />;
@@ -748,7 +754,8 @@ const App = () => {
       case 'sheet-editor': return <SheetEditorView showSnackbar={showSnackbar} />;
       case 'prompt': return <PromptView showSnackbar={showSnackbar} />;
       case 'help': return <HelpView showSnackbar={showSnackbar} />;
-      default: return <HomeView showSnackbar={showSnackbar} reloadKey={activeView} />;
+      case 'home': return <HomeView showSnackbar={showSnackbar} reloadKey={activeView} />;
+      default: return null;
     }
   };
 
@@ -840,6 +847,18 @@ const App = () => {
       </ThemeProvider>
     );
   }
+  // If we haven't finished checking auth yet, show a neutral loading screen to avoid
+  // flashing the Login/Tutorial/Licence screens briefly on startup.
+  if (!authChecked) {
+    return (
+      <ThemeProvider theme={themes[themeName] || themes.black}>
+        <CssBaseline />
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+          <CircularProgress />
+        </Box>
+      </ThemeProvider>
+    );
+  }
 
   if (!isLicenced && !isDemoOver && !isAuthenticated) {
     return (
@@ -903,7 +922,7 @@ const App = () => {
     return (
       <ThemeProvider theme={themes[themeName] || themes.black}>
         <CssBaseline />
-        <UpdateReadyView onClose={() => {setActiveView(''), setUpdateStatus('')}} />
+        <UpdateReadyView onClose={() => {setActiveView('home'); setUpdateStatus('')}} />
       </ThemeProvider>
     );
   }
@@ -1202,6 +1221,13 @@ const initializeReact = () => {
     return;
   }
 
+  // Prevent double-initialization if the script gets evaluated twice
+  if (window.__appInitialized) {
+    console.warn('initializeReact called more than once; skipping second initialization.');
+    return;
+  }
+  window.__appInitialized = true;
+
   // Clear any existing content
   while (rootElement.firstChild) {
     rootElement.removeChild(rootElement.firstChild);
@@ -1227,6 +1253,12 @@ const initializeReact = () => {
         <App />
       </React.StrictMode>
     );
+    try {
+      // send a single initialization log
+      window.api?.sendToMain && window.api.sendToMain('log', 'App mounted.');
+    } catch (e) {
+      console.warn('Failed to send mount log', e);
+    }
   } catch (error) {
     console.error('Error during render:', error);
     cleanup();
@@ -1240,10 +1272,4 @@ if (document.readyState === 'loading') {
   initializeReact();
 }
 
-useEffect(() => {
-    window.api.sendToMain('log', 'Parent component mounted.');
-
-    return () => {
-      window.api.sendToMain('log', 'Parent component unmounted.');
-    };
-  }, []);
+// NOTE: logging moved to initializeReact to avoid top-level React hooks in module scope.
