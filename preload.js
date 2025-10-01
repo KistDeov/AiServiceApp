@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
   //Adatbázis műveletek
   checkLicence: (payload) => ipcRenderer.invoke('check-licence', payload),
   isLicenceActivated: (payload) => ipcRenderer.invoke('is-licence-activated', payload),
+  activateLicence: (payload) => ipcRenderer.invoke('activate-licence', payload),
   // Authentikációs funkciók
   checkAuthStatus: () => ipcRenderer.invoke('check-auth-status'),
   loginWithGmail: () => ipcRenderer.invoke('login-with-gmail'),
@@ -89,6 +90,7 @@ contextBridge.exposeInMainWorld('api', {
   getEmail: () => ipcRenderer.invoke('get-email'),
   setActivationEmail: (email) => ipcRenderer.invoke('set-activation-email', email),
   getActivationEmail: () => ipcRenderer.invoke('get-activation-email'),
+  getTrialStatus: () => ipcRenderer.invoke('get-trial-status'),
   sendToMain: (channel, message) => {
     ipcRenderer.send(channel, message);
   },

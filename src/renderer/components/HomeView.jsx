@@ -11,6 +11,9 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsData, setStatsData] = useState([]);
   const [halfAuto, setHalfAuto] = useState(false);
+  const [trialEndDate, setTrialEndDate] = useState(null);
+  const [remainingGenerations, setRemainingGenerations] = useState(null);
+  const [timeLeftStr, setTimeLeftStr] = useState('');
 
   const handleViewChange = (view) => {
     window.api.setView(view);
@@ -41,6 +44,58 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
     };
   }, []);
 
+  // Fetch trial status (trialEndDate and remainingGenerations)
+  useEffect(() => {
+    let mounted = true;
+    async function fetchTrial() {
+      try {
+        const status = await window.api.getTrialStatus?.();
+        if (!mounted) return;
+        if (status) {
+          setTrialEndDate(status.trialEndDate || null);
+          setRemainingGenerations(typeof status.remainingGenerations === 'number' ? status.remainingGenerations : null);
+        }
+      } catch (e) {
+        console.error('[HomeView] getTrialStatus error:', e);
+      }
+    }
+    fetchTrial();
+    return () => { mounted = false; };
+  }, []);
+
+  // Countdown timer for trial end
+  useEffect(() => {
+    if (!trialEndDate) {
+      setTimeLeftStr('');
+      return;
+    }
+    let interval = null;
+    function update() {
+      const now = new Date();
+      // Normalize DB string like '2025-12-30 12:43:02' to ISO-ish
+      const normalized = trialEndDate.replace(' ', 'T');
+      const end = new Date(normalized);
+      if (isNaN(end.getTime())) {
+        setTimeLeftStr('Ismeretlen dátum');
+        return;
+      }
+      const diff = end.getTime() - now.getTime();
+      if (diff <= 0) {
+        setTimeLeftStr('Lejárt');
+        if (interval) clearInterval(interval);
+        return;
+      }
+      const days = Math.floor(diff / (24*60*60*1000));
+      const hours = Math.floor((diff % (24*60*60*1000)) / (60*60*1000));
+      const minutes = Math.floor((diff % (60*60*1000)) / (60*1000));
+      const seconds = Math.floor((diff % (60*1000)) / 1000);
+      setTimeLeftStr(`${days} nap`);
+    }
+    update();
+    interval = setInterval(update, 1000);
+    return () => { if (interval) clearInterval(interval); };
+  }, [trialEndDate]);
+
   useEffect(() => {
     let isMounted = true;
     setStatsLoading(true);
@@ -70,9 +125,21 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
 
   return (
     <Paper sx={{ p: 4, maxHeight: 675 }}>
-      <Typography variant="h4" gutterBottom>
-        Üdvözlöm, {userEmail}!
-      </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <Typography variant="h4" gutterBottom>
+          Üdvözlöm, {userEmail}!
+        </Typography>
+        {(trialEndDate || remainingGenerations !== null) && (
+          <Box sx={{ textAlign: 'right', ml: 2 }}>
+            {trialEndDate && (
+              <Typography variant="body1">Hátralévő idő: {timeLeftStr}</Typography>
+            )}
+            {remainingGenerations !== null && (
+              <Typography variant="body1">Hátralévő generálások: {remainingGenerations} db </Typography>
+            )}
+          </Box>
+        )}
+      </Box>
       <Typography variant="body1" sx={{ mt: 4 }}>
         {unreadEmails.length > 0 
           ? `${unreadEmails.length} db válaszolatlan leveled van.`
@@ -85,7 +152,7 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
         <Typography variant="body1" sx={{ mt: 2 }}>
           {unreadEmails.length > 0 
             ? `${unreadEmails.length} db előkészített leveled van.`
-            : 'Nincs Előkészített leveled'}
+            : 'Nincs előkészített leveled'}
           <IconButton onClick={() => handleViewChange('generatedMails')} size="large" sx={{ ml: 1, color: 'primary.main' }}>
               <FaArrowCircleRight />
           </IconButton>

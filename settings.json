@@ -17,5 +17,6 @@
   "webUrls": [
     "https://robotikapecs.hu/"
   ],
-  "halfAutoSend": true
+  "halfAutoSend": true,
+  "activationEmail": "kistuttosi.david@gmail.com"
 }

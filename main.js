@@ -174,11 +174,56 @@ ipcMain.handle('list-attachments', async () => {
 });
 
 // DEMO vége flag, ha több mint 100 elküldött email van
-function isDemoOver() {
+// Check whether the demo/trial period is over.
+// If a licence is supplied and a DATABASE_URL is configured, consult the database
+// for the user's `trialEndDate` and `remainingGenerations`. If either condition
+// indicates expiry, return true. Otherwise fall back to the local sent emails log.
+async function isDemoOver(licence = null) {
   try {
+    // Try DB-based checks first when possible
+    try {
+      const dbUrl = await getSecret('DATABASE_URL');
+      if (dbUrl && licence) {
+        const connection = await mysql.createConnection(dbUrl);
+        const [rows] = await connection.execute('SELECT trialEndDate, remainingGenerations FROM user WHERE licence = ? LIMIT 1', [licence]);
+        await connection.end();
+        if (Array.isArray(rows) && rows.length > 0) {
+          const row = rows[0];
+          let dbSaysOver = false;
+          // Check remainingGenerations
+          if (typeof row.remainingGenerations !== 'undefined' && row.remainingGenerations !== null) {
+            const remaining = Number(row.remainingGenerations);
+            if (!Number.isNaN(remaining) && remaining <= 0) {
+              dbSaysOver = true;
+            }
+          }
+          // Check trialEndDate (format: "YYYY-MM-DD HH:MM:SS")
+          if (!dbSaysOver && row.trialEndDate) {
+            // Replace space with 'T' so Date can parse as local/ISO
+            const normalized = row.trialEndDate.replace(' ', 'T');
+            const trialDate = new Date(normalized);
+            if (!isNaN(trialDate.getTime())) {
+              const now = new Date();
+              if (trialDate <= now) {
+                dbSaysOver = true;
+              }
+            }
+          }
+          // If DB has a definitive row, use DB result OR the sent emails log (both considered)
+          if (dbSaysOver) return true;
+          // else fall through to the sent-emails log check below
+        }
+      }
+    } catch (dbErr) {
+      // If DB check fails, log and fall back to file-based check below
+      console.error('[isDemoOver] DB check failed, falling back to local log check:', dbErr);
+    }
+
+    // Fallback: existing behavior - check sent emails log count
     const log = readSentEmailsLog();
-    return Array.isArray(log) && log.length >= 100; 
+    return Array.isArray(log) && log.length >= 100;
   } catch (e) {
+    console.error('[isDemoOver] Unexpected error:', e);
     return false;
   }
 }
@@ -209,23 +254,89 @@ async function setTrialEndedForLicence(licence) {
 }
 
 ipcMain.handle('is-demo-over', async (event) => {
-  const demoOver = isDemoOver();
-  if (demoOver) {
+  // Try to obtain licence from renderer localStorage so we can consult the DB
+  let licence = null;
+  try {
     const win = BrowserWindow.getAllWindows()[0];
     if (win) {
-      const licence = await win.webContents.executeJavaScript('localStorage.getItem("licence")');
-      console.log('[DEMO OVER] Licence:', licence); // LOG
-      if (licence) {
-        const result = await setTrialEndedForLicence(licence);
-        console.log('[DEMO OVER] setTrialEndedForLicence result:', result); // LOG
-      } else {
-        console.log('[DEMO OVER] Licence kulcs nem található a localStorage-ben!');
-      }
+      licence = await win.webContents.executeJavaScript('localStorage.getItem("licence")');
     }
-    localStorage.removeItem('isLicenced');
-    localStorage.removeItem('licence');
+  } catch (e) {
+    console.error('[is-demo-over] Could not read licence from renderer localStorage:', e);
+  }
+
+  const demoOver = await isDemoOver(licence);
+  if (demoOver) {
+    try {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win) {
+        console.log('[DEMO OVER] Licence:', licence); // LOG
+        if (licence) {
+          const result = await setTrialEndedForLicence(licence);
+          console.log('[DEMO OVER] setTrialEndedForLicence result:', result); // LOG
+        } else {
+          console.log('[DEMO OVER] Licence kulcs nem található a localStorage-ben!');
+        }
+      }
+    } catch (e) {
+      console.error('[is-demo-over] Error while handling demo-over cleanup:', e);
+    }
+    try {
+      // localStorage here refers to the main process global (not renderer). Try to remove if present in a safe way.
+      if (typeof localStorage !== 'undefined' && localStorage) {
+        localStorage.removeItem('isLicenced');
+        localStorage.removeItem('licence');
+      }
+    } catch (e) {
+      // ignore
+    }
   }
   return demoOver;
+});
+
+// Return trial status (trialEndDate, remainingGenerations) for the current licence.
+ipcMain.handle('get-trial-status', async (event) => {
+  let licence = null;
+  try {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) {
+      licence = await win.webContents.executeJavaScript('localStorage.getItem("licence")');
+    }
+  } catch (e) {
+    console.error('[get-trial-status] Could not read licence from renderer localStorage:', e);
+  }
+
+  try {
+    const dbUrl = await getSecret('DATABASE_URL');
+    if (dbUrl && licence) {
+      const connection = await mysql.createConnection(dbUrl);
+      const [rows] = await connection.execute('SELECT trialEndDate, remainingGenerations FROM user WHERE licence = ? LIMIT 1', [licence]);
+      await connection.end();
+      if (Array.isArray(rows) && rows.length > 0) {
+        const row = rows[0];
+        return {
+          trialEndDate: row.trialEndDate || null,
+          remainingGenerations: typeof row.remainingGenerations !== 'undefined' && row.remainingGenerations !== null ? Number(row.remainingGenerations) : null,
+          licence: licence
+        };
+      }
+    }
+  } catch (err) {
+    console.error('[get-trial-status] DB error:', err);
+  }
+
+  // Fallback: return nulls and provide sent log count so renderer can decide
+  try {
+    const log = readSentEmailsLog();
+    return {
+      trialEndDate: null,
+      remainingGenerations: null,
+      licence: licence,
+      sentEmailsCount: Array.isArray(log) ? log.length : 0
+    };
+  } catch (err) {
+    return { trialEndDate: null, remainingGenerations: null, licence: licence };
+  }
 });
 
 // API kulcs kezelése
@@ -1072,6 +1183,51 @@ let promptBase = `Egy ügyféltől a következő email érkezett:\n\n{greeting}\
 
 async function generateReply(email) {
   try {
+
+    try {
+      const dbUrl = await getSecret('DATABASE_URL');
+      if (dbUrl) {
+        // Determine current user email: prefer activationEmail (set on licence activation),
+        // then authState stored email, then smtpHandler config email as fallback.
+        let userEmail = null;
+        try {
+          if (typeof activationEmail !== 'undefined' && activationEmail) {
+            userEmail = activationEmail;
+          } else if (authState && authState.credentials && authState.credentials.email) {
+            userEmail = authState.credentials.email;
+          } else if (smtpHandler && smtpHandler.config && smtpHandler.config.email) {
+            userEmail = smtpHandler.config.email;
+          }
+        } catch (e) {
+          // In the unlikely event activationEmail is not accessible, fallback silently
+          if (authState && authState.credentials && authState.credentials.email) {
+            userEmail = authState.credentials.email;
+          } else if (smtpHandler && smtpHandler.config && smtpHandler.config.email) {
+            userEmail = smtpHandler.config.email;
+          }
+        }
+        if (userEmail) {
+          try {
+            const connection = await mysql.createConnection(dbUrl);
+            // Ensure we don't go below zero
+            await connection.execute(
+              'UPDATE user SET remainingGenerations = GREATEST(0, remainingGenerations - 1) WHERE email = ?',
+              [userEmail]
+            );
+            await connection.end();
+            console.log('[generateReply] Decremented remainingGenerations for', userEmail);
+          } catch (dbErr) {
+            console.error('[generateReply] DB update error:', dbErr);
+          }
+        } else {
+          console.log('[generateReply] No authenticated user email found; skipping remainingGenerations decrement.');
+        }
+      } else {
+        console.log('[generateReply] DATABASE_URL not set; skipping remainingGenerations decrement.');
+      }
+    } catch (err) {
+      console.error('[generateReply] Error while attempting to decrement remainingGenerations:', err);
+    }
     let htmlContents = [];
 
     if (settings.webUrls && Array.isArray(settings.webUrls)) {
@@ -1584,18 +1740,54 @@ ipcMain.handle('logout', async () => {
     if (smtpHandler) {
       smtpHandler = null;
     }
-    
-    // Ha Gmail-lel voltunk bejelentkezve, töröljük a token fájlt
-    if (authState.provider === 'gmail' && fs.existsSync(TOKEN_PATH)) {
-      // Ne töröljük a fájlt, csak ürítsük ki a tartalmát
-      fs.writeFileSync(TOKEN_PATH, '', 'utf-8');
-    }    
+
     // Stop email monitoring
     if (emailMonitoringInterval) {
       clearInterval(emailMonitoringInterval);
       emailMonitoringInterval = null;
     }
-    
+
+    // Try to clear emailInUse in the database for the currently authenticated user.
+    // We'll attempt multiple strategies so we reliably clear the same row we set at login:
+    // 1) Clear the row identified by activationEmail (the licence owner's email) if available
+    // 2) Clear any row that currently has emailInUse equal to the logged-in mailbox address
+    try {
+      const dbUrl = await getSecret('DATABASE_URL');
+      if (dbUrl) {
+        let connection;
+        try {
+          connection = await mysql.createConnection(dbUrl);
+
+          // 1) Clear by activationEmail (this is how login sets the row)
+          if (activationEmail) {
+            try {
+              const [res] = await connection.execute('UPDATE user SET emailInUse = NULL WHERE email = ?;', [activationEmail]);
+              console.log('[logout] Cleared emailInUse for licence owner (activationEmail):', activationEmail, 'result:', res);
+            } catch (dbErr) {
+              console.error('[logout] Failed to clear emailInUse by activationEmail:', dbErr);
+            }
+          }
+          }
+         catch (connErr) {
+          console.error('[logout] DB connection error while clearing emailInUse:', connErr);
+        } finally {
+          try { if (connection) await connection.end(); } catch (e) {}
+        }
+      }
+    } catch (err) {
+      console.error('[logout] Error while attempting to clear emailInUse:', err);
+    }
+
+    // If Gmail token exists, clear it (do this after we used authState.credentials above)
+    try {
+      if (authState.provider === 'gmail' && fs.existsSync(TOKEN_PATH)) {
+        // Ne töröljük a fájlt, csak ürítsük ki a tartalmát
+        fs.writeFileSync(TOKEN_PATH, '', 'utf-8');
+      }
+    } catch (e) {
+      console.error('[logout] Failed to clear Gmail token file:', e);
+    }
+
     authState = {
       isAuthenticated: false,
       provider: null,
@@ -1839,32 +2031,28 @@ async function describeImagesWithAI(images) {
 }
 
 ipcMain.handle('check-licence', async (event, { email, licenceKey }) => {
+  let connection;
   try {
     const dbUrl = await getSecret('DATABASE_URL');
     if (!dbUrl) {
       throw new Error('DATABASE_URL nincs beállítva Keytarban!');
     }
 
-    const connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
+    connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
     const [rows] = await connection.execute(
-      'SELECT * FROM user WHERE email = ? AND licence = ?',
+      'SELECT id FROM user WHERE email = ? AND licence = ? LIMIT 1',
       [email, licenceKey]
     );
 
-    if (rows.length > 0) {
-      await connection.execute(
-        'UPDATE user SET licenceActivated = 1 WHERE email = ? AND licence = ?',
-        [email, licenceKey]
-      );
-      await connection.end();
+    if (rows && rows.length > 0) {
       return { success: true };
-    } else {
-      await connection.end();
-      return { success: false, error: 'Hibás licenc vagy email.' };
     }
+    return { success: false, error: 'Hibás licenc vagy email.' };
   } catch (err) {
     console.error('Licenc ellenőrzési hiba:', err);
     return { success: false, error: 'Adatbázis hiba.' };
+  } finally {
+    try { if (connection) await connection.end(); } catch (e) {}
   }
 });
 
@@ -2004,19 +2192,25 @@ ipcMain.handle('get-email', async () => {
   }
 });
 
-// Új változó az aktivációs email cím tárolására
-let activationEmail = null;
+// Új változó az aktivációs email cím tárolására (in-memory, inicializálva a settingsből ha van)
+let activationEmail = settings.activationEmail || null;
 
-// Új IPC handler az aktivációs email cím beállítására
+// Új IPC handler az aktivációs email cím beállítására (most mentjük is a settings-be)
 ipcMain.handle('set-activation-email', async (event, email) => {
   activationEmail = email;
+  try {
+    settings.activationEmail = email;
+    saveSettings(settings);
+  } catch (e) {
+    console.error('[set-activation-email] Failed to save activationEmail to settings:', e);
+  }
   console.log('Activation email set:', activationEmail);
   return true;
 });
 
-// Új IPC handler az aktivációs email cím lekérdezésére
+// Új IPC handler az aktivációs email cím lekérdezésére (visszaadjuk a mentett értéket ha van)
 ipcMain.handle('get-activation-email', async () => {
-  return activationEmail;
+  return settings.activationEmail || activationEmail || null;
 });
 
 // Logging
@@ -2051,25 +2245,57 @@ function readSentEmailsLog() {
 
 // IPC handler to check licence activation
 ipcMain.handle('is-licence-activated', async (event, payload) => {
-    const { email, licenceKey } = payload;
-    try {
-        const dbUrl = await getSecret('DATABASE_URL');
-        if (!dbUrl) {
-          throw new Error('DATABASE_URL nincs beállítva Keytarban!');
-        }
-
-        const connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
-        const [rows] = await connection.execute(
-          'SELECT * FROM user WHERE email = ? AND licence = ? AND licenceActivated = 1',
-          [email, licenceKey]
-        );
-
-        await connection.end();
-        return rows.length > 0;
-    } catch (error) {
-        console.error('Error checking licence activation:', error);
-        return false;
+  const { email, licenceKey } = payload || {};
+  let connection;
+  try {
+    const dbUrl = await getSecret('DATABASE_URL');
+    if (!dbUrl) {
+      throw new Error('DATABASE_URL nincs beállítva Keytarban!');
     }
+
+    connection = await mysql.createConnection(dbUrl); // URL alapú csatlakozás
+    const [rows] = await connection.execute(
+      'SELECT licenceActivated FROM user WHERE email = ? AND licence = ? LIMIT 1',
+      [email, licenceKey]
+    );
+
+    if (!rows || rows.length === 0) {
+      // No matching record -> return false (not activated / invalid)
+      return false;
+    }
+
+    const activated = Number(rows[0].licenceActivated) === 1;
+    return activated;
+  } catch (error) {
+    console.error('Error checking licence activation:', error);
+    // On error, return true to be safe and block activation
+    return true;
+  } finally {
+    try { if (connection) await connection.end(); } catch (e) {}
+  }
+});
+
+// IPC to perform the actual activation (set licenceActivated = 1)
+ipcMain.handle('activate-licence', async (event, payload) => {
+  const { email, licenceKey } = payload || {};
+  let connection;
+  try {
+    const dbUrl = await getSecret('DATABASE_URL');
+    if (!dbUrl) throw new Error('DATABASE_URL nincs beállítva Keytarban!');
+    connection = await mysql.createConnection(dbUrl);
+    const [result] = await connection.execute(
+      'UPDATE user SET licenceActivated = 1, TrialEndDate = DATE_ADD(NOW(), INTERVAL 90 DAY) WHERE email = ? AND licence = ?',
+      [email, licenceKey]
+    );
+    // result.affectedRows can indicate success
+    const success = result && (result.affectedRows === undefined ? true : result.affectedRows > 0);
+    return { success };
+  } catch (err) {
+    console.error('Error activating licence:', err);
+    return { success: false, error: 'Adatbázis hiba.' };
+  } finally {
+    try { if (connection) await connection.end(); } catch (e) {}
+  }
 });
 
 ipcMain.handle('set-view', async (event, view) => {
