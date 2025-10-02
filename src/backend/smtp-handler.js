@@ -11,6 +11,8 @@ class SmtpEmailHandler {
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
     this.keepaliveInterval = null;
+    // Callback invoked when IMAP reports new mail (imap 'mail' event)
+    this.onMailCallback = null;
   }
 
   async connect() {
@@ -168,6 +170,19 @@ class SmtpEmailHandler {
         await this.handleDisconnect();
       });
 
+      // Notify about new mail immediately so the app can fetch and cache
+      this.imap.on('mail', async (numNew) => {
+        try {
+          console.log('IMAP mail event, new messages count:', numNew);
+          if (typeof this.onMailCallback === 'function') {
+            // call without awaiting to avoid blocking IMAP event loop
+            try { this.onMailCallback(numNew); } catch (e) { console.error('onMailCallback error:', e); }
+          }
+        } catch (e) {
+          console.error('Error handling mail event:', e);
+        }
+      });
+
       // Handle end event
       this.imap.on('end', () => {
         console.log('IMAP connection ended');
@@ -178,6 +193,11 @@ class SmtpEmailHandler {
       console.error('Error in setupImap:', error);
       throw error;
     }
+  }
+
+  // Allow main process to register a callback invoked when IMAP signals new mail
+  setOnMailCallback(cb) {
+    this.onMailCallback = cb;
   }
 
   async handleDisconnect() {

@@ -523,255 +523,138 @@ function startEmailMonitoring() {
   if (emailMonitoringInterval) {
     clearInterval(emailMonitoringInterval);
   }
-
+  // Use a regular interval to trigger checks, but the heavy work is in checkEmailsOnce
   emailMonitoringInterval = setInterval(async () => {
     try {
-      // --- INTERNET CHECK: skip if offline ---
-      const hasInternet = await checkInternetConnection();
-      if (!hasInternet) {
-        console.log('No internet connection, skipping email check.');
-        // Értesítsük a renderert
-        BrowserWindow.getAllWindows().forEach(window => {
-          window.webContents.send('no-internet-connection');
-        });
-        return;
-      } else {
-        // Ha visszajött a net, jelezzük a rendernek
-        BrowserWindow.getAllWindows().forEach(window => {
-          window.webContents.send('internet-connection-restored');
-        });
-      }
-      const currentTime = new Date();
-      const currentHour = currentTime.getHours();
-      const currentMinute = currentTime.getMinutes();
-      const currentTimeString = `${currentHour.toString().padStart(2, '0')}:${currentMinute.toString().padStart(2, '0')}`;
-
-      console.log('Checking emails at:', currentTimeString);
-
-      // --- SPAM + IGNORED szűrés ---
-      const spamKeywords = ['hirlevel', 'no-reply','noreply','no reply','spam', 'junk', 'promóció', 'reklám', 'ad', 'free money', "guaranteed", "amazing deal", "act now", "limited time", "click here", "buy now"];
-      let unreadEmails = await getEmailsBasedOnProvider();
-      // Filter out spam and ignored emails (with logging and safer whole-word matching)
-      const ignoredEmailsList = (settings.ignoredEmails || []).map(e => e.trim().toLowerCase()).filter(Boolean);
-
-      // Helper to escape regex special chars
-      const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-      // Build regexes for whole-word matching of spam keywords
-      const spamRegexes = spamKeywords.map(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i'));
-
-      const beforeCount = unreadEmails.length;
-      const filteredOut = [];
-      unreadEmails = unreadEmails.filter(email => {
-        const subject = (email.subject || '').toLowerCase();
-        const from = (email.from || '').toLowerCase();
-
-        // Gmail esetén labelIds tartalmazza-e a SPAM-t
-        if (email.labelIds && Array.isArray(email.labelIds) && email.labelIds.includes('SPAM')) {
-          filteredOut.push({ id: email.id, reason: 'label SPAM', subject: email.subject, from: email.from });
-          return false;
-        }
-
-        // Subject vagy from tartalmaz spam kulcsszót (whole-word match)
-        const matchedSpam = spamRegexes.find(rx => rx.test(email.subject || '') || rx.test(email.from || ''));
-        if (matchedSpam) {
-          filteredOut.push({ id: email.id, reason: 'spamKeyword', matched: matchedSpam.source, subject: email.subject, from: email.from });
-          return false;
-        }
-
-        // Ignore, ha benne van az ignoredEmails-ben (substring match for ignored entries)
-        const matchedIgnored = ignoredEmailsList.find(ignored => from.includes(ignored));
-        if (matchedIgnored) {
-          filteredOut.push({ id: email.id, reason: 'ignoredEmail', matchedIgnored, subject: email.subject, from: email.from });
-          return false;
-        }
-
-        return true;
-      });
-
-      console.log('Fetched emails (spam+ignored szűrve):', unreadEmails.length, `(before: ${beforeCount})`);
-      if (filteredOut.length) console.log('Filtered out emails (with reasons):', filteredOut);
-
-      // Persist filtered unread emails to cache so renderer views can read from disk
-      try {
-        saveCachedEmails(unreadEmails);
-      } catch (err) {
-        console.error('Failed to save cached emails:', err);
-      }
-      // Notify renderer about new emails for MailView update
-      BrowserWindow.getAllWindows().forEach(window => {
-        window.webContents.send('emails-updated', unreadEmails);
-      });
-
-      // Handle auto-replies if enabled
-      if (settings.autoSend && 
-          currentTimeString >= settings.autoSendStartTime && 
-          currentTimeString <= settings.autoSendEndTime &&
-          unreadEmails && 
-          unreadEmails.length > 0) {
-        
-        console.log(`Processing ${unreadEmails.length} emails for auto-reply`);
-        
-        for (const email of unreadEmails) {
-          try {
-            // IGNORE if subject or sender contains 'noreply' (case-insensitive)
-            const subjectLower = (email.subject || '').toLowerCase();
-            const fromLower = (email.from || '').toLowerCase();
-            if (subjectLower.includes('noreply') || fromLower.includes('noreply') || subjectLower.includes('no reply') || fromLower.includes('no reply') || subjectLower.includes('no-reply') || fromLower.includes('no-reply')) {
-              console.log('Skipping noreply email:', email.id, email.subject, email.from);
-              continue;
-            }
-            if (!repliedEmailIds.includes(email.id) && !replyInProgressIds.includes(email.id)) {
-              replyInProgressIds.push(email.id);
-              console.log('Processing email for reply:', email.id, email.subject);
-              // Robust getEmailById with reconnect and retry, and ignore TypeError
-              let fullEmail;
-              try {
-                fullEmail = await getEmailByIdBasedOnProvider(email.id);
-              } catch (err) {
-                if (err instanceof TypeError) {
-                  console.error('TypeError (ignored) in getEmailById:', err.message, 'Email ID:', email.id);
-                  replyInProgressIds = replyInProgressIds.filter(id => id !== email.id);
-                  continue;
-                }
-                if (authState.provider === 'smtp' && smtpHandler) {
-                  console.error('getEmailById error, trying reconnect:', err);
-                  try {
-                    await smtpHandler.connect();
-                    fullEmail = await getEmailByIdBasedOnProvider(email.id);
-                  } catch (err2) {
-                    if (err2 instanceof TypeError) {
-                      console.error('TypeError (ignored) in getEmailById after reconnect:', err2.message, 'Email ID:', email.id);
-                      replyInProgressIds = replyInProgressIds.filter(id => id !== email.id);
-                      continue;
-                    }
-                    console.error('getEmailById failed after reconnect:', err2);
-                    replyInProgressIds = replyInProgressIds.filter(id => id !== email.id);
-                    continue; // skip this email
-                  }
-                } else {
-                  console.error('getEmailById error:', err);
-                  continue;
-                }
-              }
-              let generatedReply;
-              try {
-                generatedReply = await generateReply(fullEmail);
-              } catch (err) {
-                if (err instanceof TypeError) {
-                  console.error('TypeError (ignored) in generateReply:', err.message, 'Email ID:', email.id);
-                  continue;
-                }
-                console.error('generateReply error:', err, 'Email ID:', email.id);
-                continue;
-              }
-              let replyResult;
-              try {
-                if (authState.provider === 'smtp' && smtpHandler) {
-                  const toAddress = extractEmailAddress(fullEmail.from);
-                  if (!toAddress) {
-                    console.error('Nem sikerült email címet kinyerni a from mezőből:', fullEmail.from);
-                    continue;
-                  }
-                  console.log('SMTP auto-reply sendReply params:', { to: toAddress, subject: fullEmail.subject, body: generatedReply });
-                  replyResult = await sendReply({
-                    to: toAddress,
-                    subject: `${fullEmail.subject}`,
-                    body: generatedReply,
-                    emailId: fullEmail.id,
-                    originalEmail: {
-                      to: fullEmail.from || 'Ismeretlen feladó',
-                      subject: fullEmail.subject,
-                      body: fullEmail.body
-                    }
-                  });
-                  console.log('SMTP auto-reply sendReply result:', replyResult);
-                } else if (authState.provider === 'gmail') {
-                  console.log('GMAIL auto-reply sendReply params:', { to: fullEmail.from, subject: fullEmail.subject, body: generatedReply });
-                  replyResult = await sendReply({
-                    to: fullEmail.from,
-                    subject: `${fullEmail.subject}`,
-                    body: generatedReply,
-                    emailId: fullEmail.id,
-                    originalEmail: {
-                      to: fullEmail.from || 'Ismeretlen feladó',
-                      subject: fullEmail.subject,
-                      body: fullEmail.body
-                    }
-                  });
-                  console.log('GMAIL auto-reply sendReply result:', replyResult);
-                }
-              } catch (err) {
-                if (err instanceof TypeError) {
-                  console.error('TypeError (ignored) in sendReply:', err.message, 'Email ID:', email.id);
-                  continue;
-                }
-                console.error('sendReply error:', err, 'Email ID:', email.id);
-                continue;
-              }
-              if ((replyResult && replyResult.success) || (replyResult && replyResult.id)) {
-                let markedAsRead = false;
-                let markError = null;
-                try {
-                  if (authState.provider === 'smtp' && smtpHandler) {
-                    await smtpHandler.markAsRead(email.id);
-                    markedAsRead = true;
-                  } else if (authState.provider === 'gmail') {
-                    const auth = await authorize();
-                    const gmail = google.gmail({ version: 'v1', auth });
-                    await gmail.users.messages.modify({
-                      userId: 'me',
-                      id: email.id,
-                      requestBody: {
-                        removeLabelIds: ['UNREAD']
-                      }
-                    });
-                    markedAsRead = true;
-                  }
-                } catch (err) {
-                  markError = err;
-                  console.error('Error marking email as read:', err);
-                }
-
-                if (markedAsRead) {
-                  repliedEmailIds.push(email.id);
-                  saveRepliedEmails(repliedEmailIds);
-                  // Also remove from cached emails so views will no longer show it
-                  try {
-                    removeEmailFromCache(email.id);
-                  } catch (err) {
-                    console.error('Failed to remove email from cache after auto-reply:', err);
-                  }
-                  console.log('Reply sent and email marked as read for:', email.id);
-                } else {
-                  console.error('Reply sent, but failed to mark as read:', email.id, markError);
-                }
-              } else {
-                console.error('Reply failed for email:', email.id, 'replyResult:', replyResult);
-              }
-              replyInProgressIds = replyInProgressIds.filter(id => id !== email.id);
-            } else {
-              console.log('Email already replied to:', email.id);
-            }
-          } catch (error) {
-            if (error instanceof TypeError) {
-              console.error('TypeError (ignored):', error.message, 'Email ID:', email.id);
-              continue;
-            } else {
-              console.error('Error processing email:', error, 'Email ID:', email.id);
-            }
-          }
-        }
-      }
+      await checkEmailsOnce();
     } catch (err) {
-      if (err instanceof TypeError) {
-        console.error('Top-level TypeError (ignored in interval):', err.message);
-      } else {
-        console.error('Top-level error in email monitoring interval:', err);
-      }
-      // Do not throw, just log and continue
+      console.error('Error in scheduled email check:', err);
     }
-  }, 5000); // 5 másodperc
+  }, 5000);
+}
+
+let emailCheckInProgress = false;
+async function checkEmailsOnce() {
+  // Avoid overlapping runs
+  if (emailCheckInProgress) return;
+  emailCheckInProgress = true;
+  try {
+    // --- INTERNET CHECK: skip if offline ---
+    const hasInternet = await checkInternetConnection();
+    if (!hasInternet) {
+      console.log('No internet connection, skipping email check.');
+      BrowserWindow.getAllWindows().forEach(window => window.webContents.send('no-internet-connection'));
+      return;
+    } else {
+      BrowserWindow.getAllWindows().forEach(window => window.webContents.send('internet-connection-restored'));
+    }
+
+    const currentTime = new Date();
+    const currentHour = currentTime.getHours();
+    const currentMinute = currentTime.getMinutes();
+    const currentTimeString = `${currentHour.toString().padStart(2, '0')}:${currentMinute.toString().padStart(2, '0')}`;
+
+    console.log('Checking emails at:', currentTimeString);
+
+    // --- SPAM + IGNORED szűrés ---
+    const spamKeywords = ['hirlevel', 'no-reply','noreply','no reply','spam', 'junk', 'promóció', 'reklám', 'ad', 'free money', "guaranteed", "amazing deal", "act now", "limited time", "click here", "buy now"];
+    let unreadEmails = await getEmailsBasedOnProvider();
+    const ignoredEmailsList = (settings.ignoredEmails || []).map(e => e.trim().toLowerCase()).filter(Boolean);
+    const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+    const spamRegexes = spamKeywords.map(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i'));
+
+    const beforeCount = unreadEmails.length;
+    const filteredOut = [];
+    unreadEmails = unreadEmails.filter(email => {
+      const subject = (email.subject || '').toLowerCase();
+      const from = (email.from || '').toLowerCase();
+
+      if (email.labelIds && Array.isArray(email.labelIds) && email.labelIds.includes('SPAM')) {
+        filteredOut.push({ id: email.id, reason: 'label SPAM', subject: email.subject, from: email.from });
+        return false;
+      }
+      const matchedSpam = spamRegexes.find(rx => rx.test(email.subject || '') || rx.test(email.from || ''));
+      if (matchedSpam) {
+        filteredOut.push({ id: email.id, reason: 'spamKeyword', matched: matchedSpam.source, subject: email.subject, from: email.from });
+        return false;
+      }
+      const matchedIgnored = ignoredEmailsList.find(ignored => from.includes(ignored));
+      if (matchedIgnored) {
+        filteredOut.push({ id: email.id, reason: 'ignoredEmail', matchedIgnored, subject: email.subject, from: email.from });
+        return false;
+      }
+      return true;
+    });
+
+    console.log('Fetched emails (spam+ignored szűrve):', unreadEmails.length, `(before: ${beforeCount})`);
+    if (filteredOut.length) console.log('Filtered out emails (with reasons):', filteredOut);
+
+    // Persist filtered unread emails to cache so renderer views can read from disk
+    try { saveCachedEmails(unreadEmails); } catch (err) { console.error('Failed to save cached emails:', err); }
+    BrowserWindow.getAllWindows().forEach(window => window.webContents.send('emails-updated', unreadEmails));
+
+    // Handle auto replies (re-using existing logic)
+    if (settings.autoSend && currentTimeString >= settings.autoSendStartTime && currentTimeString <= settings.autoSendEndTime && unreadEmails && unreadEmails.length > 0) {
+      console.log(`Processing ${unreadEmails.length} emails for auto-reply`);
+      for (const email of unreadEmails) {
+        try {
+          const subjectLower = (email.subject || '').toLowerCase();
+          const fromLower = (email.from || '').toLowerCase();
+          if (subjectLower.includes('noreply') || fromLower.includes('noreply') || subjectLower.includes('no reply') || fromLower.includes('no reply') || subjectLower.includes('no-reply') || fromLower.includes('no-reply')) {
+            console.log('Skipping noreply email:', email.id, email.subject, email.from);
+            continue;
+          }
+          if (!repliedEmailIds.includes(email.id) && !replyInProgressIds.includes(email.id)) {
+            replyInProgressIds.push(email.id);
+            console.log('Processing email for reply:', email.id, email.subject);
+            let fullEmail;
+            try { fullEmail = await getEmailByIdBasedOnProvider(email.id); } catch (err) {
+              console.error('getEmailById error:', err);
+              replyInProgressIds = replyInProgressIds.filter(id => id !== email.id);
+              continue;
+            }
+            let generatedReply;
+            try { generatedReply = await generateReply(fullEmail); } catch (err) { console.error('generateReply error:', err); replyInProgressIds = replyInProgressIds.filter(id => id !== email.id); continue; }
+            let replyResult;
+            try {
+              if (authState.provider === 'smtp' && smtpHandler) {
+                const toAddress = extractEmailAddress(fullEmail.from);
+                if (!toAddress) { console.error('Nem sikerült email címet kinyerni a from mezőből:', fullEmail.from); replyInProgressIds = replyInProgressIds.filter(id => id !== email.id); continue; }
+                replyResult = await sendReply({ to: toAddress, subject: `${fullEmail.subject}`, body: generatedReply, emailId: fullEmail.id, originalEmail: { to: fullEmail.from || 'Ismeretlen feladó', subject: fullEmail.subject, body: fullEmail.body } });
+              } else if (authState.provider === 'gmail') {
+                replyResult = await sendReply({ to: fullEmail.from, subject: `${fullEmail.subject}`, body: generatedReply, emailId: fullEmail.id, originalEmail: { to: fullEmail.from || 'Ismeretlen feladó', subject: fullEmail.subject, body: fullEmail.body } });
+              }
+            } catch (err) { console.error('sendReply error:', err); replyInProgressIds = replyInProgressIds.filter(id => id !== email.id); continue; }
+
+            if ((replyResult && replyResult.success) || (replyResult && replyResult.id)) {
+              let markedAsRead = false;
+              try {
+                if (authState.provider === 'smtp' && smtpHandler) {
+                  await smtpHandler.markAsRead(email.id);
+                  markedAsRead = true;
+                } else if (authState.provider === 'gmail') {
+                  const auth = await authorize();
+                  const gmail = google.gmail({ version: 'v1', auth });
+                  await gmail.users.messages.modify({ userId: 'me', id: email.id, requestBody: { removeLabelIds: ['UNREAD'] } });
+                  markedAsRead = true;
+                }
+              } catch (err) { console.error('Error marking email as read:', err); }
+
+              if (markedAsRead) {
+                repliedEmailIds.push(email.id);
+                saveRepliedEmails(repliedEmailIds);
+                try { removeEmailFromCache(email.id); } catch (err) { console.error('Failed to remove email from cache after auto-reply:', err); }
+                console.log('Reply sent and email marked as read for:', email.id);
+              }
+            }
+            replyInProgressIds = replyInProgressIds.filter(id => id !== email.id);
+          }
+        } catch (err) { console.error('Error processing email for auto-reply:', err); }
+      }
+    }
+  } finally {
+    emailCheckInProgress = false;
+  }
 }
 
 function stopEmailMonitoring() {
@@ -1777,6 +1660,15 @@ ipcMain.handle('login-with-smtp', async (event, config) => {
   try {
     console.log('Attempting SMTP login...'); // Debug log
     smtpHandler = new SmtpEmailHandler(config);
+    // Register callback so IMAP 'mail' events trigger an immediate check
+    try {
+      smtpHandler.setOnMailCallback(() => {
+        // trigger a background check without awaiting
+        checkEmailsOnce().catch(err => console.error('Error in onMail triggered check:', err));
+      });
+    } catch (e) {
+      console.warn('Could not set onMail callback on smtpHandler:', e);
+    }
     const success = await smtpHandler.connect();
     
     if (success) {
@@ -1983,6 +1875,9 @@ app.whenReady().then(async () => {
       } else if (authState.provider === 'smtp' && authState.credentials) {
         console.log('Reconnecting to SMTP...'); // Debug log
         smtpHandler = new SmtpEmailHandler(authState.credentials);
+        try {
+          smtpHandler.setOnMailCallback(() => checkEmailsOnce().catch(err => console.error('Error in onMail triggered check:', err)));
+        } catch (e) { console.warn('Could not set onMail callback on smtpHandler:', e); }
         const success = await smtpHandler.connect();
         if (success) {
           console.log('SMTP reconnection successful'); // Debug log
