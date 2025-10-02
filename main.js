@@ -34,6 +34,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const REPLIED_EMAILS_FILE = findFile('repliedEmails.json');
 const GENERATED_REPLIES_FILE = findFile('GeneratedReplies.json');
+const CACHED_EMAILS_FILE = findFile('cached_emails.json');
 
 // Környezeti változók és útvonalak kezelése
 const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json');
@@ -548,7 +549,7 @@ function startEmailMonitoring() {
       console.log('Checking emails at:', currentTimeString);
 
       // --- SPAM + IGNORED szűrés ---
-      const spamKeywords = ['no-reply','noreply','no reply','spam', 'junk', 'promóció', 'reklám', 'ad', 'free money', "guaranteed", "amazing deal", "act now", "limited time", "click here", "buy now"];
+      const spamKeywords = ['hirlevel', 'no-reply','noreply','no reply','spam', 'junk', 'promóció', 'reklám', 'ad', 'free money', "guaranteed", "amazing deal", "act now", "limited time", "click here", "buy now"];
       let unreadEmails = await getEmailsBasedOnProvider();
       // Filter out spam and ignored emails (with logging and safer whole-word matching)
       const ignoredEmailsList = (settings.ignoredEmails || []).map(e => e.trim().toLowerCase()).filter(Boolean);
@@ -591,6 +592,12 @@ function startEmailMonitoring() {
       console.log('Fetched emails (spam+ignored szűrve):', unreadEmails.length, `(before: ${beforeCount})`);
       if (filteredOut.length) console.log('Filtered out emails (with reasons):', filteredOut);
 
+      // Persist filtered unread emails to cache so renderer views can read from disk
+      try {
+        saveCachedEmails(unreadEmails);
+      } catch (err) {
+        console.error('Failed to save cached emails:', err);
+      }
       // Notify renderer about new emails for MailView update
       BrowserWindow.getAllWindows().forEach(window => {
         window.webContents.send('emails-updated', unreadEmails);
@@ -729,6 +736,12 @@ function startEmailMonitoring() {
                 if (markedAsRead) {
                   repliedEmailIds.push(email.id);
                   saveRepliedEmails(repliedEmailIds);
+                  // Also remove from cached emails so views will no longer show it
+                  try {
+                    removeEmailFromCache(email.id);
+                  } catch (err) {
+                    console.error('Failed to remove email from cache after auto-reply:', err);
+                  }
                   console.log('Reply sent and email marked as read for:', email.id);
                 } else {
                   console.error('Reply sent, but failed to mark as read:', email.id, markError);
@@ -868,6 +881,41 @@ function saveGeneratedReplies(replies) {
     fs.writeFileSync(GENERATED_REPLIES_FILE, JSON.stringify(replies, null, 2), 'utf-8');
   } catch (err) {
     console.error('Hiba a generated_replies.json mentésekor:', err);
+  }
+}
+
+// Cached emails helpers: the monitoring loop will write the filtered unread emails
+function readCachedEmails() {
+  try {
+    if (fs.existsSync(CACHED_EMAILS_FILE)) {
+      const data = fs.readFileSync(CACHED_EMAILS_FILE, 'utf-8');
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error('Hiba a cached_emails.json beolvasásakor:', err);
+  }
+  return [];
+}
+
+function saveCachedEmails(emails) {
+  try {
+    fs.writeFileSync(CACHED_EMAILS_FILE, JSON.stringify(Array.isArray(emails) ? emails : [], null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Hiba a cached_emails.json mentésekor:', err);
+  }
+}
+
+function removeEmailFromCache(emailId) {
+  try {
+    const emails = readCachedEmails();
+    const filtered = emails.filter(e => e.id !== emailId);
+    saveCachedEmails(filtered);
+    // Notify renderer of update
+    BrowserWindow.getAllWindows().forEach(window => {
+      window.webContents.send('emails-updated', filtered);
+    });
+  } catch (err) {
+    console.error('Hiba a cached_emails.json frissítésekor:', err);
   }
 }
 
@@ -1278,6 +1326,7 @@ async function generateReply(email) {
     // Use greeting and signature from settings
     const greeting = settings.greeting || defaultSettings.greeting;
     const signature = settings.signature || defaultSettings.signature;
+
     // Képleírások összegyűjtése (emailből)
     let imageDescriptions = '';
     if (email.aiImageResponses && email.aiImageResponses.length > 0) {
@@ -1294,14 +1343,46 @@ async function generateReply(email) {
       imageDescriptions += '\n';
     }
 
+    // Safety: trim very large inputs to avoid exceeding model context limits.
+    // We use character-based truncation as a cheap approximation (1 token ~ ~4 chars).
+    function safeTrim(text, maxChars) {
+      if (!text) return '';
+      if (typeof text !== 'string') text = String(text);
+      if (text.length <= maxChars) return text;
+      return text.slice(0, maxChars) + '\n\n[...további tartalom levágva...]';
+    }
+
+    const SAFE_HTML_MAX_CHARS = 20000; // ~5k tokens upper-bound approximation
+    const SAFE_EXCEL_MAX_CHARS = 8000;
+    const SAFE_IMAGE_DESC_MAX_CHARS = 3000;
+
+    const safeCombinedHtml = safeTrim(combinedHtml || '', SAFE_HTML_MAX_CHARS);
+    const safeFormattedExcelData = safeTrim(formattedExcelData || '', SAFE_EXCEL_MAX_CHARS);
+    const safeImageDescriptions = safeTrim(imageDescriptions || '', SAFE_IMAGE_DESC_MAX_CHARS);
+    const safeExcelImageDescriptions = safeTrim(excelImageDescriptions || '', SAFE_IMAGE_DESC_MAX_CHARS);
+
+    // Debug logging to help diagnose large inputs
+    try {
+      console.log('[generateReply] sizes:', {
+        combinedHtmlLength: (combinedHtml || '').length,
+        combinedHtmlTrimmed: safeCombinedHtml.length,
+        excelDataLength: (formattedExcelData || '').length,
+        excelDataTrimmed: safeFormattedExcelData.length,
+        imageDescLength: (imageDescriptions || '').length,
+        imageDescTrimmed: safeImageDescriptions.length
+      });
+    } catch (e) {
+      // ignore logging errors
+    }
+
     const finalPrompt = promptBase
       .replace('{greeting}', greeting)
       .replace('{signature}', signature)
       .replace('{email.body}', email.body)
-      .replace('{excelData}', formattedExcelData)
-      .replace('{imageDescriptions}', imageDescriptions)
-      .replace('{excelImageDescriptions}', excelImageDescriptions)
-      .replace('{webUrls}', combinedHtml || 'N/A');
+      .replace('{excelData}', safeFormattedExcelData)
+      .replace('{imageDescriptions}', safeImageDescriptions)
+      .replace('{excelImageDescriptions}', safeExcelImageDescriptions)
+      .replace('{webUrls}', safeCombinedHtml || 'N/A');
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -1471,15 +1552,20 @@ ipcMain.on('open-external', (event, url) => {
 
 ipcMain.handle('get-unread-emails', async () => {
   try {
-    // Ensure email fetching only starts for the correct provider
-    if (authState.provider === 'gmail') {
-      console.log('Using Gmail provider, starting Gmail email fetching...');
+    // Return cached emails if available so renderer can read quickly
+    const cached = readCachedEmails();
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      console.log('Returning cached unread emails:', cached.length);
+      return cached;
+    }
+    // Fallback: fetch live based on provider and cache result
+    if (authState.provider === 'gmail' || authState.provider === 'smtp') {
+      console.log('No cache found, fetching emails live for provider:', authState.provider);
       const emails = await getEmailsBasedOnProvider();
-      console.log('Fetched emails:', emails.map(email => ({ id: email.id, subject: email.subject })));
+      // Apply same filtering as monitoring loop to be consistent
+      // (we rely on startEmailMonitoring normally to populate cache)
+      saveCachedEmails(emails);
       return emails;
-    } else if (authState.provider === 'smtp') {
-      console.log('Using SMTP provider, skipping Gmail email fetching.');
-      return []; // Skip Gmail fetching
     }
   } catch (error) {
     console.error('Hiba az emailek lekérésekor:', error);
@@ -1561,6 +1647,12 @@ ipcMain.handle('send-reply', async (event, { to, subject, body, emailId }) => {
       if (!repliedEmailIds.includes(emailId)) {
         repliedEmailIds.push(emailId);
         saveRepliedEmails(repliedEmailIds);
+      }
+      // Remove from cache so renderer no longer shows it
+      try {
+        removeEmailFromCache(emailId);
+      } catch (err) {
+        console.error('Failed to remove email from cache after send-reply:', err);
       }
     } catch (err) {
       console.error('Nem sikerült olvasottnak jelölni a levelet:', err);

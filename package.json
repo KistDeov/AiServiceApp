@@ -1,6 +1,6 @@
 {
   "name": "aimail",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "description": "An aplication that uses AI to answer mails",
   "main": "main.js",
   "type": "module",
@@ -27,7 +27,6 @@
       "requestedExecutionLevel": "requireAdministrator"
     },
     "nsis": {
-      "include": "build/custom.nsi",
       "oneClick": false,
       "installerIcon": "./assets/icon.ico",
       "uninstallerIcon": "./assets/icon.ico",
@@ -55,7 +54,8 @@
       "server.js",
       "sentEmailsLog.json",
       "repliedEmails.json",
-      "GeneratedReplies.json"
+      "GeneratedReplies.json",
+      "cached_emails.json"
     ],
     "extraResources": [
       ".env",
@@ -64,7 +64,8 @@
       "settings.json",
       "sentEmailsLog.json",
       "repliedEmails.json",
-      "GeneratedReplies.json"
+      "GeneratedReplies.json",
+      "cached_emails.json"
     ]
   },
   "keywords": [],

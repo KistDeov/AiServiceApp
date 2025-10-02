@@ -9,6 +9,9 @@ import { FaArrowCircleRight } from 'react-icons/fa';
 import CenteredLoading from './CenteredLoading';
 
 const SheetEditorView = ({ showSnackbar, embedded = false, onClose }) => {
+  const MAX_SHEETS = 3;
+  const MAX_CHARS_PER_SHEET = 1000; // character limit per sheet
+
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [excelSheets, setExcelSheets] = useState([]);
@@ -21,7 +24,23 @@ const SheetEditorView = ({ showSnackbar, embedded = false, onClose }) => {
       setLoading(true);
       const res = await window.api.readExcelFile?.();
       if (res && res.success) {
-        const sheets = res.sheets || [];
+        let sheets = res.sheets || [];
+        // enforce maximum number of sheets by truncating extra ones
+        if (sheets.length > MAX_SHEETS) {
+          showSnackbar?.(`Maximum ${MAX_SHEETS} munkalap engedélyezett. A további lapok el lesznek távolítva.`, 'error');
+          sheets = sheets.slice(0, MAX_SHEETS);
+        }
+        // enforce character limit per sheet by truncating data text
+        sheets = sheets.map((s) => {
+          const text = (s.data || []).map((r) => r.map((c) => (c === null || c === undefined) ? '' : String(c)).join('\t')).join('\n');
+          if (text.length > MAX_CHARS_PER_SHEET) {
+            showSnackbar?.(`A(z) "${s.name || ''}" munkalap túl hosszú; levágjuk ${MAX_CHARS_PER_SHEET} karakterre.`, 'warning');
+            const truncatedText = text.slice(0, MAX_CHARS_PER_SHEET);
+            const rows = truncatedText.split('\n').map((line) => line.split('\t').map((c) => c));
+            return { ...s, data: rows };
+          }
+          return s;
+        });
         setExcelSheets(sheets);
         // preserve the previously active sheet index if possible, otherwise default to 0
         const prev = activeSheetIndex || 0;
@@ -29,7 +48,7 @@ const SheetEditorView = ({ showSnackbar, embedded = false, onClose }) => {
         setActiveSheetIndex(newActive);
         if (sheets && sheets[newActive]) {
           const text = (sheets[newActive].data || []).map((r) => r.map((c) => (c === null || c === undefined) ? '' : String(c)).join('\t')).join('\n');
-          setSheetEditText(text);
+          setSheetEditText(text.slice(0, MAX_CHARS_PER_SHEET));
         } else {
           setSheetEditText('');
         }
@@ -46,7 +65,7 @@ const SheetEditorView = ({ showSnackbar, embedded = false, onClose }) => {
           setExcelFilename('');
         }
       } else {
-        showSnackbar('Nem sikerült beolvasni az Excel fájlt: ' + (res?.error || ''), 'error');
+        showSnackbar('Nincs excel fájl feltöltve. A szerkesztéshez tölts fel egyet.');
       }
     } catch (e) {
       console.error(e);
@@ -66,9 +85,15 @@ const SheetEditorView = ({ showSnackbar, embedded = false, onClose }) => {
     const prevIndex = activeSheetIndex;
     const currentText = sheetEditText;
     // build a new sheets array with the previous sheet's data updated
+    // enforce char limit when persisting previous sheet
     const updatedSheets = excelSheets.map((s, i) => {
       if (i !== prevIndex) return s;
-      const rows = (currentText || '').split('\n').map((line) => line.split('\t').map((c) => c));
+      let text = (currentText || '');
+      if (text.length > MAX_CHARS_PER_SHEET) {
+        showSnackbar?.(`A munkalap tartalma túl hosszú, csak az első ${MAX_CHARS_PER_SHEET} karakter kerül mentésre.`, 'warning');
+        text = text.slice(0, MAX_CHARS_PER_SHEET);
+      }
+      const rows = text.split('\n').map((line) => line.split('\t').map((c) => c));
       return { ...s, data: rows };
     });
     setExcelSheets(updatedSheets);
@@ -100,6 +125,11 @@ const SheetEditorView = ({ showSnackbar, embedded = false, onClose }) => {
   };
 
   const handleAddSheet = () => {
+    // enforce max sheets
+    if (excelSheets.length >= MAX_SHEETS) {
+      showSnackbar?.(`Maximum ${MAX_SHEETS} munkalap engedélyezett.`, 'error');
+      return;
+    }
     // create an empty sheet with a default name that doesn't clash
     const baseName = 'Munka';
     let idx = excelSheets.length + 1;
@@ -121,6 +151,7 @@ const SheetEditorView = ({ showSnackbar, embedded = false, onClose }) => {
   const [renameValue, setRenameValue] = useState('');
   const [renameIndex, setRenameIndex] = useState(-1);
   const [confirmDeleteIndex, setConfirmDeleteIndex] = useState(-1);
+  const [confirmExportOpen, setConfirmExportOpen] = useState(false);
 
   const openRename = (index) => {
     const s = excelSheets[index];
@@ -176,9 +207,15 @@ const SheetEditorView = ({ showSnackbar, embedded = false, onClose }) => {
     try {
       setSaving(true);
       // Ensure current editor contents are persisted into the sheets we send to the backend
+      // persist current editor contents into the sheets we send to the backend
       const sheetsToSave = excelSheets.map((s, idx) => {
         if (idx === activeSheetIndex) {
-          const rows = (sheetEditText || '').split('\n').map((line) => line.split('\t').map((c) => c));
+          let text = (sheetEditText || '');
+          if (text.length > MAX_CHARS_PER_SHEET) {
+            showSnackbar?.(`A munkalap mentésekor a tartalom túl hosszú; csak az első ${MAX_CHARS_PER_SHEET} karakter kerül mentésre.`, 'warning');
+            text = text.slice(0, MAX_CHARS_PER_SHEET);
+          }
+          const rows = text.split('\n').map((line) => line.split('\t').map((c) => c));
           return { name: s.name || `Sheet${idx+1}`, data: rows };
         }
         return { name: s.name || `Sheet${idx+1}`, data: s.data || [] };
@@ -186,6 +223,11 @@ const SheetEditorView = ({ showSnackbar, embedded = false, onClose }) => {
 
       // If there are no existing sheets (edge case), create one from editor content
       const sheetsArg = (sheetsToSave.length > 0) ? sheetsToSave : [{ name: 'Sheet1', data: (sheetEditText || '').split('\n').map(l => l.split('\t').map(c => c)) }];
+
+      // final enforcement: ensure no more than MAX_SHEETS are saved
+      if (sheetsArg.length > MAX_SHEETS) {
+        showSnackbar?.(`Mentés előtt a munkalapok száma maximalizálva lesz ${MAX_SHEETS}-re.`, 'warning');
+      }
 
       const res = await window.api.saveExcelFile?.({ sheets: sheetsArg });
       if (res && res.success) {
@@ -272,14 +314,17 @@ const SheetEditorView = ({ showSnackbar, embedded = false, onClose }) => {
               }}
               variant="outlined"
             />
+            <Typography sx={{ mt: 1, color: 'rgba(255,255,255,0.65)', textAlign: 'right' }}>
+              {Math.min(sheetEditText.length, MAX_CHARS_PER_SHEET)} / {MAX_CHARS_PER_SHEET} karakter
+            </Typography>
           </Box>
 
           {/* Sticky footer with action buttons so they remain visible */}
           <Box sx={{ position: 'sticky', bottom: 0, zIndex: 10, bgcolor: '#181818', borderTop: '1px solid rgba(255,255,255,0.04)', p: 2, display: 'flex', gap: 2, justifyContent: 'center' }}>
-            <Button variant="contained" onClick={handleSaveExcel} disabled={saving} sx={{ bgcolor: '#ffd400', color: '#000', '&:hover': { bgcolor: '#ffdb4d' }, minWidth: 160 }}>
-              {saving ? 'Mentés...' : 'Mentés Excelbe'}
+            <Button variant="contained" onClick={() => setConfirmExportOpen(true)} disabled={saving} sx={{ bgcolor: '#ffd400', color: '#000', '&:hover': { bgcolor: '#ffdb4d' }, minWidth: 160 }}>
+              {saving ? 'Mentés...' : 'Exortálás Excelbe'}
             </Button>
-            <Button variant="outlined" onClick={handleAddSheet} sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)', minWidth: 140 }}>Új munkalap</Button>
+            <Button variant="outlined" onClick={handleAddSheet} sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)', minWidth: 140 }} disabled={excelSheets.length >= MAX_SHEETS}>Új munkalap</Button>
             <Button variant="outlined" onClick={() => openRename(activeSheetIndex)} sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)', minWidth: 120 }}>Átnevez</Button>
             <IconButton onClick={() => requestDelete(activeSheetIndex)} sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.08)' }}>
               <MdDelete />
@@ -308,6 +353,20 @@ const SheetEditorView = ({ showSnackbar, embedded = false, onClose }) => {
         <DialogActions>
           <Button onClick={cancelDelete}>Mégsem</Button>
           <Button onClick={confirmDelete} variant="contained" color="error">Törlés</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Export confirm dialog */}
+      <Dialog open={confirmExportOpen} onClose={() => setConfirmExportOpen(false)}>
+        <DialogTitle>Exportálás megerősítése</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Biztosan exportálod a jelenlegi munkalapokat? A korábban feltöltött Excel munkafüzet felülíródik.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmExportOpen(false)}>Mégsem</Button>
+          <Button onClick={() => { setConfirmExportOpen(false); handleSaveExcel(); }} variant="contained" sx={{ bgcolor: '#ffd400', color: '#000', '&:hover': { bgcolor: '#ffdb4d' } }}>Exportálás</Button>
         </DialogActions>
       </Dialog>
     </Paper>

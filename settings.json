@@ -1,6 +1,6 @@
 {
   "autoSend": false,
-  "halfAuto": true,
+  "halfAuto": false,
   "autoSendStartTime": "00:00",
   "autoSendEndTime": "23:59",
   "displayMode": "fullscreen",
@@ -14,9 +14,7 @@
   "maxEmailDate": "",
   "notifyOnAutoReply": false,
   "notificationEmail": "",
-  "webUrls": [
-    "https://robotikapecs.hu/"
-  ],
+  "webUrls": [],
   "halfAutoSend": true,
-  "activationEmail": "kistuttosi.david@gmail.com"
+  "activationEmail": ""
 }

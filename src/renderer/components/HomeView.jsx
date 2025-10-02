@@ -59,9 +59,17 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
       }
 
       // Subscribe to updates AFTER we've loaded ignore/replied lists
-      window.api.onEmailsUpdated((newEmails) => {
-        const filtered = (newEmails || []).filter(e => !repliedEmailIds.has(e.id) && !isEmailIgnored(e));
-        setUnreadEmails(filtered);
+      window.api.onEmailsUpdated(async (newEmails) => {
+        try {
+          const replied = await window.api.getRepliedEmailIds?.();
+          const repliedSetLatest = new Set(Array.isArray(replied) ? replied : []);
+          const filtered = (newEmails || []).filter(e => !repliedSetLatest.has(e.id) && !isEmailIgnored(e));
+          setUnreadEmails(filtered);
+        } catch (err) {
+          console.warn('onEmailsUpdated: failed to get replied ids, proceeding without:', err);
+          const filtered = (newEmails || []).filter(e => !isEmailIgnored(e));
+          setUnreadEmails(filtered);
+        }
       });
 
       Promise.all([

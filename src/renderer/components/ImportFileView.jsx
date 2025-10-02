@@ -203,10 +203,16 @@ const ImportFileView = ({ showSnackbar }) => {
   }, [originalUploadedFileName]);
 
   const handleAddUrl = () => {
-    if (newWebUrl.trim() && !webUrls.includes(newWebUrl.trim())) {
-      setWebUrls([...webUrls, newWebUrl.trim()]);
-      setNewWebUrl('');
+    const trimmed = newWebUrl.trim();
+    // limit: only 1 URL allowed
+    if (!trimmed) return;
+    if (webUrls.includes(trimmed)) return;
+    if (webUrls.length >= 1) {
+      showSnackbar?.('Csak egy weboldal adható meg (max 1). Töröld a meglévőt először.', 'error');
+      return;
     }
+    setWebUrls([...webUrls, trimmed]);
+    setNewWebUrl('');
   };
 
   const handleDeleteUrl = (url) => {
@@ -280,7 +286,8 @@ const ImportFileView = ({ showSnackbar }) => {
         {section === 'websites' && (
           <Paper variant="outlined" sx={{ p: 4, bgcolor: '#181818', color: 'white', borderRadius: 1, boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
             <Typography variant="h5" gutterBottom sx={{ color: 'white', textAlign: 'center' }}>Weboldalak megadása</Typography>
-            <Typography variant="h8" gutterBottom sx={{ color: 'rgba(255,255,255,0.75)', textAlign: 'center', ml: 8 }}>Itt megadhatod a vállalkozásod, céged weboldalait, hogy az AI megértse mivel foglalkozik a céged, ezzel segítve a pontosabb válaszadást.</Typography>
+            <Typography variant="h8" gutterBottom sx={{ color: 'rgba(255,255,255,0.75)', textAlign: 'center', ml: 8 }}>Itt megadhatod a vállalkozásod, céged weboldalait, hogy az AI megértse mivel foglalkozik a céged, ezzel segítve a pontosabb válaszadást.<br /></Typography>
+             <Typography variant="h8" gutterBottom sx={{ color: 'rgba(255,255,255,0.75)', textAlign: 'center' ,ml: 4 }}>Az AI nem tudja feldolgzni a weboldalon lévő képeket, videókat, a további információkat az "Adatbázis szerkesztése" menüpont alatt tudod megadni.</Typography>
 
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, mt: 2 }}>
               <TextField
@@ -294,9 +301,10 @@ const ImportFileView = ({ showSnackbar }) => {
                 InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.85)' } }}
                 inputProps={{ style: { color: 'white' } }}
               />
-              <Button variant="contained" onClick={handleAddUrl} disabled={!newWebUrl.trim() || !!urlError} sx={{ mt: 1, bgcolor: '#ffd400', color: '#000', '&:hover': { bgcolor: '#ffdb4d' }, width: 180 }}>
+              <Button variant="contained" onClick={handleAddUrl} disabled={!newWebUrl.trim() || !!urlError || webUrls.length >= 1} sx={{ mt: 1, bgcolor: '#ffd400', color: '#000', '&:hover': { bgcolor: '#ffdb4d' }, width: 180 }}>
                 Hozzáadás
               </Button>
+              <Typography sx={{ mt: 1, color: 'rgba(255,255,255,0.65)' }}>Weboldalak: {webUrls.length} / 1</Typography>
             </Box>
 
             <List sx={{ mt: 3, maxHeight: 140, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -322,8 +330,8 @@ const ImportFileView = ({ showSnackbar }) => {
         {section === 'excel' && (
           <Paper variant="outlined" sx={{ p: 4, mt: 1, bgcolor: '#181818', color: 'white', borderRadius: 1, boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
             <Typography variant="h5" gutterBottom sx={{ color: 'white', textAlign: 'center' }}>Adatbázis importálása</Typography>
-            <Typography variant="h8" gutterBottom sx={{ color: 'rgba(228, 125, 0, 1)', textAlign: 'center', ml: 15 }}>Az adatok az AI-nak lesznek átadva. Ne adjon meg semmilyen olyan kényes adatot, amit az interneten sem osztana meg!</Typography>
-
+            <Typography variant="h8" gutterBottom sx={{ color: 'rgba(228, 125, 0, 1)', textAlign: 'center', ml: 13 }}>Az adatok az AI-nak lesznek átadva. Ne adjon meg semmilyen olyan kényes adatot, amit az interneten sem osztana meg!<br /></Typography>
+             <Typography variant="h8" gutterBottom sx={{ color: 'rgba(255,255,255,0.75)', textAlign: 'center', ml: 24 }}>FONTOS: Maximum 3 munkalap importálható, munkalaponként 1000 karakter hosszúságú.</Typography>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 3 }}>
               <Button
                 variant="contained"

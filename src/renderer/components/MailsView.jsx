@@ -14,6 +14,7 @@ const MailsView = ({ showSnackbar }) => {
   const [replyBody, setReplyBody] = useState('');
   const [repliedEmailIds, setRepliedEmailIds] = useState(new Set());
   const [ignoredEmails, setIgnoredEmails] = useState([]);
+  const [generating, setGenerating] = useState(false);
   const [search, setSearch] = useState('');
 
   // Built-in patterns we want to auto-ignore in addition to user-provided list
@@ -28,29 +29,37 @@ const MailsView = ({ showSnackbar }) => {
         setIgnoredEmails([]);
       })
       .finally(() => {
-        // Subscribe to update events
-        window.api.onEmailsUpdated((newEmails) => {
-          let repliedSet = new Set(repliedEmailIds);
-          const filtered = newEmails.filter(email => !repliedSet.has(email.id) && !isEmailIgnored(email));
-          console.log('Updated emails:', newEmails);
-          console.log('Filtered emails:', filtered);
-          setEmails(filtered);
+        // Subscribe to update events - always fetch latest replied ids to avoid stale closure
+        window.api.onEmailsUpdated(async (newEmails) => {
+          try {
+            const replied = await window.api.getRepliedEmailIds?.();
+            const repliedSet = new Set(Array.isArray(replied) ? replied : []);
+            const filtered = (newEmails || []).filter(email => !repliedSet.has(email.id) && !isEmailIgnored(email));
+            console.log('Updated emails:', newEmails);
+            console.log('Filtered emails:', filtered);
+            setEmails(filtered);
 
-          // If the currently selected email is no longer present after filtering, clear selection
-          if (selectedEmail && !filtered.find(e => e.id === selectedEmail.id)) {
-            setSelectedEmail(null);
-            setFullEmail(null);
+            // If the currently selected email is no longer present after filtering, clear selection
+            if (selectedEmail && !filtered.find(e => e.id === selectedEmail.id)) {
+              setSelectedEmail(null);
+              setFullEmail(null);
+            }
+          } catch (err) {
+            console.warn('onEmailsUpdated failed to get replied ids:', err);
+            const filtered = (newEmails || []).filter(email => !isEmailIgnored(email));
+            setEmails(filtered);
           }
         });
 
-        window.api.getUnreadEmails()
-          .then(async (data) => {
-            let repliedSet = new Set();
-            setLoading(false);
-            const filtered = data.filter(email => !repliedSet.has(email.id) && !isEmailIgnored(email));
-            console.log('Fetched unread emails:', data);
-            console.log('Filtered unread emails:', filtered);
+        // Initialize by reading replied ids and cached unread emails
+        Promise.all([window.api.getRepliedEmailIds?.(), window.api.getUnreadEmails()])
+          .then(([repliedList, data]) => {
+            const repliedSet = new Set(Array.isArray(repliedList) ? repliedList : []);
             setRepliedEmailIds(repliedSet);
+            setLoading(false);
+            const filtered = (data || []).filter(email => !repliedSet.has(email.id) && !isEmailIgnored(email));
+            console.log('Fetched unread emails (from cache):', data);
+            console.log('Filtered unread emails:', filtered);
             setEmails(filtered);
           })
       .catch(err => {
@@ -140,17 +149,33 @@ const MailsView = ({ showSnackbar }) => {
   const handleGenerateReply = () => {
     if (!fullEmail) return;
     setLoadingFull(true);
+    setGenerating(true);
     window.api.generateReply(fullEmail)
       .then((generated) => {
-        setReplySubject(generated.subject);
-        setReplyBody(generated.body);
+        const subj = (generated && generated.subject) || `Re: ${fullEmail.subject || ''}`;
+        const body = (generated && generated.body) || '';
+        setReplySubject(subj);
+        setReplyBody(body);
         setGeneratedMode(true);
-        setLoadingFull(false);
+
+        // Persist the generated reply to stored generated replies (GeneratedReplies.json)
+        window.api.readGeneratedReplies()
+          .then(stored => {
+            const merged = { ...(stored || {}) };
+            merged[fullEmail.id] = { subject: subj, body };
+            return window.api.saveGeneratedReplies(merged);
+          })
+          .catch(err => {
+            console.warn('Nem sikerült elmenteni a generált választ:', err);
+          });
       })
       .catch(err => {
         console.error('Hiba a válasz generálásakor:', err);
-        setLoadingFull(false);
         showSnackbar('Hiba a válasz generálása során', 'error');
+      })
+      .finally(() => {
+        setLoadingFull(false);
+        setGenerating(false);
       });
   };
 
@@ -195,7 +220,7 @@ const MailsView = ({ showSnackbar }) => {
       >
         <Typography variant="h5" gutterBottom>Levelezés részletei</Typography>
         {loadingFull || !fullEmail ? (
-          <CenteredLoading size={48} text={'Betöltés...'} />
+          <CenteredLoading size={48} text={generating ? 'Válasz generálása...' : 'Betöltés...'} />
         ) : (replyMode || generatedMode) ? (
           <>
             <Typography><strong>Válasz a következő címzettnek:</strong> {fullEmail.from}</Typography>
