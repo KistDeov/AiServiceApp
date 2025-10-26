@@ -923,6 +923,127 @@ ipcMain.handle('show-image-dialog', async () => {
   return { success: false, error: 'No file selected' };
 });
 
+// Show directory picker to select a folder for import
+ipcMain.handle('show-directory-dialog', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory']
+  });
+
+  if (!result.canceled && result.filePaths.length > 0) {
+    return { success: true, dirPath: result.filePaths[0] };
+  }
+  return { success: false, error: 'No directory selected' };
+});
+
+// Import a folder recursively, extract text from supported files and generate embeddings
+ipcMain.handle('import-folder-embeddings', async (event, { dirPath, model = 'text-embedding-3-small', maxChunkChars = 3000 } = {}) => {
+  try {
+    if (!dirPath || !fs.existsSync(dirPath)) {
+      return { success: false, error: 'Directory does not exist' };
+    }
+
+    const supported = new Set(['.txt', '.csv', '.xlsx', '.xls']);
+
+    // Walk directory recursively
+    const walk = (dir) => {
+      let results = [];
+      const list = fs.readdirSync(dir, { withFileTypes: true });
+      for (const dirent of list) {
+        const full = path.join(dir, dirent.name);
+        if (dirent.isDirectory()) {
+          results = results.concat(walk(full));
+        } else if (dirent.isFile()) {
+          const ext = path.extname(dirent.name).toLowerCase();
+          if (supported.has(ext)) results.push(full);
+        }
+      }
+      return results;
+    };
+
+    const files = walk(dirPath);
+    const totalFiles = files.length;
+
+    const embeddingsOut = [];
+
+    // dynamic import for xlsx library
+    let XLSX;
+    try {
+      XLSX = await import('xlsx');
+    } catch (e) {
+      // fallback: try require
+      try { XLSX = require('xlsx'); } catch (e2) { XLSX = null; }
+    }
+
+    for (let fi = 0; fi < files.length; fi++) {
+      const file = files[fi];
+      const ext = path.extname(file).toLowerCase();
+      let text = '';
+
+      try {
+        if (ext === '.txt' || ext === '.csv') {
+          text = fs.readFileSync(file, 'utf8');
+        } else if ((ext === '.xlsx' || ext === '.xls') && XLSX) {
+          try {
+            const wb = XLSX.readFile(file);
+            for (const sname of wb.SheetNames) {
+              const csv = XLSX.utils.sheet_to_csv(wb.Sheets[sname]);
+              text += '\n' + csv;
+            }
+          } catch (e) {
+            console.error('[import-folder-embeddings] xlsx read error for', file, e);
+          }
+        } else {
+          // unsupported or no parser - skip
+        }
+      } catch (readErr) {
+        console.error('[import-folder-embeddings] read error for', file, readErr);
+      }
+
+      text = (text || '').toString().trim();
+      if (!text) {
+        // notify progress: skipped
+        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, status: 'skipped', reason: 'empty' }));
+        continue;
+      }
+
+      // chunk text to avoid very large embedding inputs
+      const chunks = [];
+      for (let i = 0; i < text.length; i += maxChunkChars) {
+        chunks.push(text.slice(i, i + maxChunkChars));
+      }
+
+      for (let ci = 0; ci < chunks.length; ci++) {
+        const chunk = chunks[ci];
+        try {
+          BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, chunkIndex: ci + 1, totalChunks: chunks.length, status: 'embedding' }));
+          const resp = await openai.embeddings.create({ model, input: chunk });
+          const emb = resp?.data && resp.data[0] && resp.data[0].embedding ? resp.data[0].embedding : null;
+          embeddingsOut.push({ id: `${fi}-${ci}`, file, chunkIndex: ci, textSnippet: chunk.slice(0, 200), embedding: emb });
+        } catch (embErr) {
+          console.error('[import-folder-embeddings] embedding error for', file, embErr);
+          BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, chunkIndex: ci + 1, totalChunks: chunks.length, status: 'error', error: embErr?.message || String(embErr) }));
+        }
+      }
+
+      // file done
+      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, status: 'done' }));
+    }
+
+    // save embeddings to userData
+    const embeddingsPath = path.join(app.getPath('userData'), 'embeddings.json');
+    try {
+      fs.writeFileSync(embeddingsPath, JSON.stringify(embeddingsOut, null, 2), 'utf8');
+    } catch (writeErr) {
+      console.error('[import-folder-embeddings] write embeddings error', writeErr);
+      return { success: false, error: 'Failed to save embeddings: ' + writeErr.message };
+    }
+
+    return { success: true, embeddingsPath, count: embeddingsOut.length };
+  } catch (err) {
+    console.error('[import-folder-embeddings] unexpected', err);
+    return { success: false, error: err?.message || String(err) };
+  }
+});
 //Értesítések
 ipcMain.handle("getNotifyOnAutoReply", async () => {
   return settings.notifyOnAutoReply || false;
@@ -1110,7 +1231,8 @@ ipcMain.handle('saveWebSettings', async (event, { webUrls }) => {
 // Fetch data from the web URL
 
 // Refactor promptBase and generateReply
-let promptBase = `Egy ügyféltől a következő email érkezett:\n\n{greeting}\n\n"{email.body}"\n\n{imageDescriptions}\n\n{excelImageDescriptions}\n\nA következő adatokat használd fel a válaszadáshoz:\n{excelData}\n\n{signature}\n\n{webUrls}\nEzekről a htmlek-ről is gyűjtsd ki a szükséges információkat a válaszadáshoz: {webUrls}, gyűjts ki a szükséges információkat, linkeket, telefonszámokat, email címeket és így tovább és ezeket küldd vissza.\n\n`;
+// Added {embeddingsContext} placeholder so we can inject nearest-file snippets from the imported embeddings
+let promptBase = `Egy ügyféltől a következő email érkezett:\n\n{greeting}\n\n"{email.body}"\n\n{imageDescriptions}\n\n{excelImageDescriptions}\n\nA következő adatokat használd fel a válaszadáshoz:\n{excelData}\n\n{signature}\n\n{webUrls}\n{embeddingsContext}\nEzekről a htmlek-ről is gyűjtsd ki a szükséges információkat a válaszadáshoz: {webUrls}, gyűjts ki a szükséges információkat, linkeket, telefonszámokat, email címeket és így tovább és ezeket küldd vissza.\n\n`;
 
 async function generateReply(email) {
   try {
@@ -1244,6 +1366,43 @@ async function generateReply(email) {
     const safeImageDescriptions = safeTrim(imageDescriptions || '', SAFE_IMAGE_DESC_MAX_CHARS);
     const safeExcelImageDescriptions = safeTrim(excelImageDescriptions || '', SAFE_IMAGE_DESC_MAX_CHARS);
 
+    // Build embeddings-based context (if embeddings.json exists)
+    let embeddingsContext = '';
+    try {
+      const embeddingsFile = path.join(app.getPath('userData'), 'embeddings.json');
+      if (fs.existsSync(embeddingsFile)) {
+        const raw = fs.readFileSync(embeddingsFile, 'utf8');
+        const stored = JSON.parse(raw || '[]');
+        if (Array.isArray(stored) && stored.length > 0) {
+          try {
+            const embResp = await openai.embeddings.create({ model: 'text-embedding-3-small', input: email.body });
+            const emailEmb = embResp?.data?.[0]?.embedding;
+            if (emailEmb) {
+              const cosine = (a, b) => {
+                let dot = 0, na = 0, nb = 0;
+                for (let i = 0; i < a.length; i++) {
+                  dot += (a[i] || 0) * (b[i] || 0);
+                  na += (a[i] || 0) * (a[i] || 0);
+                  nb += (b[i] || 0) * (b[i] || 0);
+                }
+                na = Math.sqrt(na); nb = Math.sqrt(nb);
+                return na && nb ? dot / (na * nb) : 0;
+              };
+
+              const scored = stored.map(s => ({ score: cosine(emailEmb, s.embedding || []), item: s }));
+              scored.sort((a, b) => b.score - a.score);
+              const top = scored.slice(0, 3).filter(s => s.item && s.item.textSnippet).map(s => `(${s.score.toFixed(3)}) ${s.item.textSnippet}`);
+              if (top.length) embeddingsContext = 'Releváns dokumentumok a tudásbázisból:\n' + top.join('\n');
+            }
+          } catch (e) {
+            console.error('[generateReply] embedding lookup failed', e);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[generateReply] failed to build embeddings context', e);
+    }
+
     // Debug logging to help diagnose large inputs
     try {
       console.log('[generateReply] sizes:', {
@@ -1265,7 +1424,8 @@ async function generateReply(email) {
       .replace('{excelData}', safeFormattedExcelData)
       .replace('{imageDescriptions}', safeImageDescriptions)
       .replace('{excelImageDescriptions}', safeExcelImageDescriptions)
-      .replace('{webUrls}', safeCombinedHtml || 'N/A');
+      .replace('{webUrls}', safeCombinedHtml || 'N/A')
+      .replace('{embeddingsContext}', embeddingsContext || '');
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -1298,13 +1458,7 @@ async function sendReply({ to, subject, body, emailId, originalEmail }) {
     let watermarkCid = 'watermark';
     let htmlBody = body.replace(/\n/g, '<br>');
 
-    // Add original email details
-    if (originalEmail) {
-      htmlBody += `<br><br>--- Eredeti üzenet ---`;
-      htmlBody += `<br><br><strong>Feladó:</strong> ${originalEmail.to}`;
-      htmlBody += `<br><strong>Tárgy:</strong> ${originalEmail.subject}`;
-      htmlBody += `<br><br><strong>Üzenet:</strong><br>${originalEmail.body.replace(/\n/g, '<br>')}`;
-    }
+    
 
     // Add signature text
     if (signatureText) htmlBody += `<br><br>${signatureText}`;
@@ -1317,6 +1471,14 @@ async function sendReply({ to, subject, body, emailId, originalEmail }) {
     // Add watermark image
     if (fs.existsSync(watermarkImagePath)) {
       htmlBody += `<br><img src=\"cid:${watermarkCid}\" style=\"width:25%\">`;
+    }
+
+    // Add original email details
+    if (originalEmail) {
+      htmlBody += `<br><br>--- Eredeti üzenet ---`;
+      htmlBody += `<br><br><strong>Feladó:</strong> ${originalEmail.to}`;
+      htmlBody += `<br><strong>Tárgy:</strong> ${originalEmail.subject}`;
+      htmlBody += `<br><br><strong>Üzenet:</strong><br>${originalEmail.body.replace(/\n/g, '<br>')}`;
     }
 
     // --- Attachments: list all files in attachments folder ---

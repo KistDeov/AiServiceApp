@@ -16,6 +16,7 @@ const ImportFileView = ({ showSnackbar }) => {
   const [saving, setSaving] = useState(false);
   const [urlError, setUrlError] = useState('');
   const [section, setSection] = useState('websites');
+  const [importProgress, setImportProgress] = useState([]);
 
   // Excel status
   const [excelExists, setExcelExists] = useState(false);
@@ -164,6 +165,25 @@ const ImportFileView = ({ showSnackbar }) => {
     }).catch(() => {});
   }, []);
 
+  // Listen to import progress events from main process
+  useEffect(() => {
+    const handler = (data) => {
+      setImportProgress((prev) => [...prev, data]);
+    };
+    try {
+      window.api.receive('import-progress', handler);
+    } catch (e) {
+      console.error('Failed to attach import-progress listener', e);
+    }
+    return () => {
+      try {
+        window.api.remove('import-progress', handler);
+      } catch (e) {
+        // ignore
+      }
+    };
+  }, []);
+
   // load saved displayed filename from localStorage on mount (so it survives view reloads)
   useEffect(() => {
     try {
@@ -280,6 +300,7 @@ const ImportFileView = ({ showSnackbar }) => {
         <Tab label="Weboldalak" value="websites" />
         <Tab label="Adatbázis feltöltés" value="excel" />
         <Tab label="Adatbázis szerkesztés" value="editor" />
+        <Tab label="Fájl importálás" value="file_import" />
       </Tabs>
 
       <Box>
@@ -389,6 +410,75 @@ const ImportFileView = ({ showSnackbar }) => {
         {section === 'editor' && (
           // render the full SheetEditorView inline so the tab doesn't switch the whole app view
           <SheetEditorView showSnackbar={showSnackbar} embedded onClose={() => setSection('excel')} />
+        )}
+
+        {section === 'file_import' && (
+         <Paper variant="outlined" sx={{ p: 4, mt: 1, bgcolor: '#181818', color: 'white', borderRadius: 1, boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
+            <Typography variant="h5" gutterBottom sx={{ color: 'white', textAlign: 'center' }}>Fájlok / Mappa importálása és embedding készítése</Typography>
+            <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.75)', textAlign: 'center', mb: 2 }}>Válassz ki egy mappát — a program rekurzívan feldolgozza a .txt, .csv és .xlsx fájlokat, kinyeri a szöveget és OpenAI embeddinget készít róla.</Typography>
+
+            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
+              <Button variant="contained" onClick={async () => {
+                try {
+                  const res = await window.api.showDirectoryDialog?.();
+                  if (res && res.success) {
+                    setSelectedFileName(res.dirPath);
+                  }
+                } catch (e) {
+                  showSnackbar('Hiba a mappa kiválasztásakor', 'error');
+                }
+              }} disabled={loading} sx={{ bgcolor: '#ffd400', color: '#000', '&:hover': { bgcolor: '#ffdb4d' } }}>
+                Mappa kiválasztása
+              </Button>
+
+              <Button variant="contained" onClick={async () => {
+                if (!selectedFileName) return;
+                setSaving(true);
+                setImportProgress([]);
+                try {
+                  const result = await window.api.importFolderForEmbeddings?.({ dirPath: selectedFileName });
+                  if (result && result.success) {
+                    showSnackbar(`Import kész — ${result.count} embedding mentve.`, 'success');
+                    setUploadedFilePath(result.embeddingsPath || '');
+                  } else {
+                    showSnackbar(`Hiba: ${result?.error || 'Ismeretlen hiba'}`, 'error');
+                  }
+                } catch (e) {
+                  console.error('Import error', e);
+                  showSnackbar('Hiba történt az import során!', 'error');
+                } finally {
+                  setSaving(false);
+                }
+              }} disabled={!selectedFileName || saving} sx={{ bgcolor: '#00b894', color: '#000', '&:hover': { bgcolor: '#33d9b2' } }}>
+                {saving ? 'Importálás...' : 'Import indítása'}
+              </Button>
+            </Box>
+
+            {selectedFileName && (
+              <Typography sx={{ mt: 2, color: 'rgba(255,255,255,0.85)', textAlign: 'center', wordBreak: 'break-all' }}>Kiválasztott mappa: {selectedFileName}</Typography>
+            )}
+
+            <Box sx={{ mt: 3 }}>
+              <Typography sx={{ color: 'rgba(255,255,255,0.75)', mb: 1 }}>Feldolgozás állapota:</Typography>
+              <List sx={{ maxHeight: 240, overflowY: 'auto', bgcolor: 'rgba(255,255,255,0.02)', borderRadius: 1 }}>
+                {importProgress.length === 0 && (
+                  <ListItem>
+                    <ListItemText primary={saving ? 'Várakozás...' : 'Nincs művelet még.'} primaryTypographyProps={{ sx: { color: 'rgba(255,255,255,0.6)' } }} />
+                  </ListItem>
+                )}
+                {importProgress.map((p, idx) => (
+                  <ListItem key={idx} sx={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                    <ListItemText
+                      primary={`${p.file ? p.file.split(/[/\\]/).pop() : 'file'} — ${p.status}${p.chunkIndex ? ` (chunk ${p.chunkIndex}/${p.totalChunks || '?'})` : ''}`}
+                      primaryTypographyProps={{ sx: { color: 'white', fontSize: 13 } }}
+                      secondary={p.error ? `Hiba: ${p.error}` : (p.reason ? p.reason : '')}
+                      secondaryTypographyProps={{ sx: { color: 'rgba(255,255,255,0.6)', fontSize: 12 } }}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
+          </Paper>
         )}
       </Box>
     </Paper>

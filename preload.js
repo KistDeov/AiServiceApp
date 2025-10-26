@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('api', {
   listAttachments: () => ipcRenderer.invoke('list-attachments'),
   showFileDialog: () => ipcRenderer.invoke('show-file-dialog'),
   showImageDialog: () => ipcRenderer.invoke('show-image-dialog'),
+  showDirectoryDialog: () => ipcRenderer.invoke('show-directory-dialog'),
+  importFolderForEmbeddings: (opts) => ipcRenderer.invoke('import-folder-embeddings', opts),
   deleteSignatureImage: () => ipcRenderer.invoke('delete-signature-image'),
   openExternal: (url) => ipcRenderer.send('open-external', url),
   //Adatbázis műveletek
