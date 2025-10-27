@@ -1,6 +1,6 @@
 {
   "name": "aimail",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "An aplication that uses AI to answer mails",
   "main": "main.js",
   "type": "module",
