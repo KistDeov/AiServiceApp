@@ -494,7 +494,7 @@ async function getEmailsBasedOnProvider() {
     });
   }
 
-  console.log('Emails after date filtering:', emails.map(email => ({ id: email.id, subject: email.subject })));
+  //console.log('Emails after date filtering:', emails.map(email => ({ id: email.id, subject: email.subject })));
   return emails;
 }
 
@@ -587,7 +587,7 @@ async function checkEmailsOnce() {
     });
 
     console.log('Fetched emails (spam+ignored szűrve):', unreadEmails.length, `(before: ${beforeCount})`);
-    if (filteredOut.length) console.log('Filtered out emails (with reasons):', filteredOut);
+    //if (filteredOut.length) console.log('Filtered out emails (with reasons):', filteredOut);
 
     // Persist filtered unread emails to cache so renderer views can read from disk
     try { saveCachedEmails(unreadEmails); } catch (err) { console.error('Failed to save cached emails:', err); }
@@ -965,13 +965,21 @@ ipcMain.handle('import-folder-embeddings', async (event, { dirPath, model = 'tex
 
     const embeddingsOut = [];
 
-    // dynamic import for xlsx library
-    let XLSX;
+    // dynamic import for xlsx library (handle default export vs namespace)
+    let XLSX = null;
     try {
-      XLSX = await import('xlsx');
+      const mod = await import('xlsx');
+      XLSX = mod && (mod.default || mod);
     } catch (e) {
-      // fallback: try require
-      try { XLSX = require('xlsx'); } catch (e2) { XLSX = null; }
+      try {
+        const mod = require('xlsx');
+        XLSX = mod && (mod.default || mod);
+      } catch (e2) {
+        XLSX = null;
+      }
+    }
+    if (!XLSX) {
+      console.warn('[import-folder-embeddings] xlsx library not available; .xlsx files will be skipped');
     }
 
     for (let fi = 0; fi < files.length; fi++) {
@@ -984,13 +992,23 @@ ipcMain.handle('import-folder-embeddings', async (event, { dirPath, model = 'tex
           text = fs.readFileSync(file, 'utf8');
         } else if ((ext === '.xlsx' || ext === '.xls') && XLSX) {
           try {
-            const wb = XLSX.readFile(file);
+            // ensure readFile exists (some bundlers expose under default)
+            const reader = typeof XLSX.readFile === 'function' ? XLSX : (XLSX.default || XLSX);
+            if (typeof reader.readFile !== 'function') {
+              throw new Error('XLSX.readFile is not available');
+            }
+            const wb = reader.readFile(file);
             for (const sname of wb.SheetNames) {
-              const csv = XLSX.utils.sheet_to_csv(wb.Sheets[sname]);
+              const csv = (XLSX.utils && XLSX.utils.sheet_to_csv)
+                ? XLSX.utils.sheet_to_csv(wb.Sheets[sname])
+                : (reader.utils && reader.utils.sheet_to_csv)
+                  ? reader.utils.sheet_to_csv(wb.Sheets[sname])
+                  : '';
               text += '\n' + csv;
             }
           } catch (e) {
             console.error('[import-folder-embeddings] xlsx read error for', file, e);
+            BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, status: 'error', error: e?.message || String(e) }));
           }
         } else {
           // unsupported or no parser - skip

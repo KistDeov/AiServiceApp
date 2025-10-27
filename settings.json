@@ -15,6 +15,6 @@
   "notifyOnAutoReply": false,
   "notificationEmail": "",
   "webUrls": [],
-  "halfAutoSend": true,
+  "halfAutoSend": false,
   "activationEmail": ""
 }
