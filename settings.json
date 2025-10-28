@@ -16,5 +16,6 @@
   "notificationEmail": "",
   "webUrls": [],
   "halfAutoSend": false,
-  "activationEmail": ""
+  "activationEmail": "",
+  "fromDate": ""
 }

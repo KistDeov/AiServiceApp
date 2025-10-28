@@ -141,6 +141,15 @@ const AutoSendConfirmDialog = ({ open, onClose, onConfirm, startTime, endTime, o
   );
 };
 
+// Helper to return today's date in YYYY-MM-DD format for date inputs
+const getTodayISO = () => {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 const themeOptions = [
   { value: 'black', label: 'Sötét (Alapértelmezett)' },
   { value: 'purple', label: 'Lila' },
@@ -164,6 +173,8 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
   const [ignoredEmails, setIgnoredEmails] = useState("");
   const [minEmailDate, setMinEmailDate] = useState(""); // ÚJ
   const [maxEmailDate, setMaxEmailDate] = useState(""); // ÚJ
+  // Default fromDate to today's date
+  const [fromDate, setFromDate] = useState(() => getTodayISO());
   const [notifyOnAutoReply, setNotifyOnAutoReply] = useState(false);
   const [notificationEmail, setNotificationEmail] = useState("");
   const [section, setSection] = useState('appearance');
@@ -182,9 +193,11 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
       window.api.getIgnoredEmails ? window.api.getIgnoredEmails() : Promise.resolve([]),
       window.api.getMinEmailDate ? window.api.getMinEmailDate() : Promise.resolve(""),
       window.api.getMaxEmailDate ? window.api.getMaxEmailDate() : Promise.resolve(""),
+      // load persisted fromDate if available from the API, otherwise resolve to empty string
+      window.api.getFromDate ? window.api.getFromDate() : Promise.resolve("") ,
       window.api.getNotifyOnAutoReply(),
       window.api.getNotificationEmail()
-    ]).then(([autoSendVal, halfAutoVal, times, mode, timed, ignored, minDate, maxDate, notify, email]) => {
+    ]).then(([autoSendVal, halfAutoVal, times, mode, timed, ignored, minDate, maxDate, fromDateVal, notify, email]) => {
       setAutoSend(autoSendVal);
       setHalfAuto(halfAutoVal);
       setStartTime(times.startTime);
@@ -194,6 +207,8 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
       setIgnoredEmails((ignored || []).join(", "));
       setMinEmailDate(minDate || "");
       setMaxEmailDate(maxDate || "");
+      // If API returned a value for fromDate, use it; otherwise keep today's date
+      setFromDate(fromDateVal || getTodayISO());
       setNotifyOnAutoReply(notify || false);
       setNotificationEmail(email || "");
       // If both modes are enabled by stored settings, prefer automatic mode and turn off half-automatic.
@@ -350,6 +365,11 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
     window.api.setMaxEmailDate && window.api.setMaxEmailDate(e.target.value);
   };
 
+  const handlefromDateChange = (e) => {
+    setFromDate(e.target.value);
+    window.api.setFromDate && window.api.setFromDate(e.target.value);
+  };
+
   const handleNotifyOnAutoReplyChange = (event) => {
     const newValue = event.target.checked;
     setNotifyOnAutoReply(newValue);
@@ -375,6 +395,7 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
           <Tabs value={section} onChange={(e, val) => setSection(val)} variant="fullWidth" sx={{ mb: 2 }}>
             <Tab label="Kinézet" value="appearance" />
             <Tab label="Auto" value="autosend" />
+            <Tab label="AI Levél" value="ai" />
             <Tab label="Szűrések" value="filters" />
           </Tabs>
 
@@ -422,9 +443,7 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
                         <FormControlLabel control={<Switch sx={{ ml: 1 }} checked={halfAuto || pendingHalfAuto} onChange={handleHalfAutoSendChange} disabled={autoSend || pendingAutoSend} />} label="Félautomata válaszküldés" />
                         <Box sx={{ mt: 2 }}>
                           <FormControlLabel control={<Switch sx={{ ml: 1 }} checked={notifyOnAutoReply} onChange={handleNotifyOnAutoReplyChange} />} label="Értesítés küldése automatikus válasz esetén" />
-                          {notifyOnAutoReply && (
-                            <TextField label="Értesítési email cím" value={notificationEmail} onChange={handleNotificationEmailChange} placeholder="pl. admin@example.com" fullWidth sx={{ mt: 1 }} />
-                          )}
+                          <TextField label="Értesítési email cím" value={notificationEmail} onChange={handleNotificationEmailChange} placeholder="pl. admin@example.com" fullWidth sx={{ mt: 1 }} />
                         </Box>
                       </FormGroup>
                       
@@ -458,6 +477,25 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
                   </Paper>
                 </Grid>
               )}
+
+              {section === 'ai' && (
+                <Grid item xs={12} sx={{ height: '100%', display: 'flex', justifyContent: 'center' }}>
+                  <Paper variant="outlined" sx={{ p: 3, height: '100%', width: sectionWidth, maxWidth: '100%', display: 'flex', flexDirection: 'column', overflow: 'auto', flex: 'none', mx: 'auto' }}>
+                    <Box sx={{ width: '100%' }}>
+                      <Typography variant="h6" gutterBottom align="center">AI levélkeresési beállítások</Typography>
+                      <Divider sx={{ mb: 2 }} />
+                    </Box>
+                    <Box>
+                      <Typography variant="subtitle1">Eddig a dátumig keressen a levelekben az AI a válaszadáshoz</Typography>
+                      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mt: 1 }}>
+                        <TextField label="Dátum" type="date" value={fromDate} onChange={handlefromDateChange} InputLabelProps={{ shrink: true }} sx={{ width: 220 }} />
+                      </Box>
+                    </Box>
+                  </Paper>
+                </Grid>
+              )}
+
+
             </Grid>
           </Box>
         </Box>

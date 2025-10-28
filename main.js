@@ -2,7 +2,7 @@ import { findFile } from './src/utils/findFile.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { app, BrowserWindow, ipcMain, dialog, shell, webContents} from 'electron';
-import { getUnreadEmails, getEmailById } from './gmail.js';
+import { getUnreadEmails, getEmailById, getRecentEmails } from './gmail.js';
 import { OpenAI } from 'openai';
 import XLSX from 'xlsx';
 import { authorize } from './src/backend/auth.js';
@@ -717,6 +717,16 @@ ipcMain.handle('setMinEmailDate', async (event, dateStr) => {
   return true;
 });
 
+ipcMain.handle('getFromDate', async () => {
+  return settings.fromDate || "";
+});
+
+ipcMain.handle('setFromDate', async (event, dateStr) => {
+  settings.fromDate = dateStr;
+  saveSettings(settings);
+  return true;
+});
+
 ipcMain.handle('getMaxEmailDate', async () => {
   return settings.maxEmailDate || "";
 });
@@ -1254,6 +1264,27 @@ let promptBase = `Egy ügyféltől a következő email érkezett:\n\n{greeting}\
 
 async function generateReply(email) {
   try {
+    // Ensure we have full email body: always try to fetch the full email by id when available.
+    // This guarantees that if the renderer passed only a snippet or cached record, we still
+    // retrieve the complete body (and any OCR/aiImageResponses) before generating a reply.
+    try {
+      if (email && email.id) {
+        try {
+          const full = await getEmailByIdBasedOnProvider(email.id);
+          if (full) {
+            if (full.body) email.body = full.body;
+            if (full.aiImageResponses) email.aiImageResponses = full.aiImageResponses;
+            // prefer richer fields if available
+            if (full.subject) email.subject = full.subject;
+            if (full.from) email.from = full.from;
+          }
+        } catch (e) {
+          console.warn('[generateReply] could not fetch full email by id, proceeding with provided email', e);
+        }
+      }
+    } catch (e) {
+      console.warn('[generateReply] pre-fetch full email guard failed', e);
+    }
 
     try {
       const dbUrl = await getSecret('DATABASE_URL');
@@ -1384,41 +1415,171 @@ async function generateReply(email) {
     const safeImageDescriptions = safeTrim(imageDescriptions || '', SAFE_IMAGE_DESC_MAX_CHARS);
     const safeExcelImageDescriptions = safeTrim(excelImageDescriptions || '', SAFE_IMAGE_DESC_MAX_CHARS);
 
-    // Build embeddings-based context (if embeddings.json exists)
+    // Helper: extract probable license/identifier codes from text (simple heuristic)
+    function extractCodesFromText(text) {
+      if (!text) return [];
+      try {
+        // Look for alphanumeric sequences of length 6-20 (common licence keys), allow hyphens
+        const re = /\b[A-Z0-9][-A-Z0-9]{4,19}\b/gi;
+        const matches = (String(text).match(re) || []).map(m => m.replace(/[^A-Z0-9-]/gi, '').trim()).filter(Boolean);
+        return Array.from(new Set(matches));
+      } catch (e) {
+        return [];
+      }
+    }
+
+    // Build embeddings-based context: combine (A) existing embeddings.json knowledge base
+    // and (B) the most similar snippets from the user's recent emails (last 50 loaded from mailbox).
+    // This block computes the embedding for the incoming email once and reuses it.
     let embeddingsContext = '';
     try {
-      const embeddingsFile = path.join(app.getPath('userData'), 'embeddings.json');
-      if (fs.existsSync(embeddingsFile)) {
-        const raw = fs.readFileSync(embeddingsFile, 'utf8');
-        const stored = JSON.parse(raw || '[]');
-        if (Array.isArray(stored) && stored.length > 0) {
-          try {
-            const embResp = await openai.embeddings.create({ model: 'text-embedding-3-small', input: email.body });
-            const emailEmb = embResp?.data?.[0]?.embedding;
-            if (emailEmb) {
-              const cosine = (a, b) => {
-                let dot = 0, na = 0, nb = 0;
-                for (let i = 0; i < a.length; i++) {
-                  dot += (a[i] || 0) * (b[i] || 0);
-                  na += (a[i] || 0) * (a[i] || 0);
-                  nb += (b[i] || 0) * (b[i] || 0);
-                }
-                na = Math.sqrt(na); nb = Math.sqrt(nb);
-                return na && nb ? dot / (na * nb) : 0;
-              };
+      const modelForEmb = 'text-embedding-3-small';
 
+      // compute embedding for the incoming email (used as query)
+      let emailEmb = null;
+      try {
+        const embResp = await openai.embeddings.create({ model: modelForEmb, input: String(email.body || email.subject || '') });
+        emailEmb = embResp?.data?.[0]?.embedding || null;
+      } catch (e) {
+        console.error('[generateReply] failed to compute embedding for incoming email', e);
+      }
+
+      const cosine = (a, b) => {
+        if (!a || !b || a.length !== b.length) return 0;
+        let dot = 0, na = 0, nb = 0;
+        for (let i = 0; i < a.length; i++) {
+          dot += (a[i] || 0) * (b[i] || 0);
+          na += (a[i] || 0) * (a[i] || 0);
+          nb += (b[i] || 0) * (b[i] || 0);
+        }
+        na = Math.sqrt(na); nb = Math.sqrt(nb);
+        return na && nb ? dot / (na * nb) : 0;
+      };
+
+      // (A) Lookup in stored embeddings (embeddings.json) if present
+      try {
+        const embeddingsFile = path.join(app.getPath('userData'), 'embeddings.json');
+        if (fs.existsSync(embeddingsFile)) {
+          const raw = fs.readFileSync(embeddingsFile, 'utf8');
+          const stored = JSON.parse(raw || '[]');
+          if (Array.isArray(stored) && stored.length > 0 && emailEmb) {
+            try {
+              // Score all stored items against the incoming email
               const scored = stored.map(s => ({ score: cosine(emailEmb, s.embedding || []), item: s }));
               scored.sort((a, b) => b.score - a.score);
-              const top = scored.slice(0, 3).filter(s => s.item && s.item.textSnippet).map(s => `(${s.score.toFixed(3)}) ${s.item.textSnippet}`);
-              if (top.length) embeddingsContext = 'Releváns dokumentumok a tudásbázisból:\n' + top.join('\n');
+              // Build a more informative snippet for each top item: include title/url/source/filePath and a short snippet
+              const topItems = scored.slice(0, 5).filter(s => s.item);
+              const fileSnippets = topItems.map(s => {
+                const it = s.item || {};
+                // If the stored item looks like an email, prefer From/Subject/Date/Body formatting
+                if (it.subject || it.from || it.body) {
+                  const from = it.from || it.author || '';
+                  const subject = it.subject || '';
+                  const date = it.date || it.createdAt || '';
+                  const body = safeTrim(String(it.body || it.text || it.content || it.textSnippet || '').replace(/\s+/g, ' '), 1000);
+                  const src = it.source || it.url || it.filePath ? ` | Source: ${it.source || it.url || it.filePath}` : '';
+                  return `(${s.score.toFixed(3)}) From: ${from} | Subject: ${subject} | Date: ${date}${src}\n${body}`;
+                }
+                // Otherwise treat as generic document/snippet
+                const title = it.title || it.name || it.source || it.url || it.filePath || 'Név nélküli forrás';
+                const snippet = it.textSnippet || it.content || it.text || it.summary || '';
+                const short = safeTrim(String(snippet || '').replace(/\s+/g, ' '), 800);
+                const metaParts = [];
+                if (it.url) metaParts.push(`URL: ${it.url}`);
+                if (it.filePath) metaParts.push(`Fájl: ${it.filePath}`);
+                if (it.source) metaParts.push(`Forrás: ${it.source}`);
+                const meta = metaParts.length ? ` (${metaParts.join(' | ')})` : '';
+                return `(${s.score.toFixed(3)}) ${title}${meta}\n${short}`;
+              });
+              if (fileSnippets.length) embeddingsContext += 'Releváns dokumentumok a tudásbázisból:\n' + fileSnippets.join('\n\n') + '\n\n';
+            } catch (e) {
+              console.error('[generateReply] embedding lookup in embeddings.json failed', e);
             }
-          } catch (e) {
-            console.error('[generateReply] embedding lookup failed', e);
           }
         }
+      } catch (e) {
+        console.error('[generateReply] failed to read embeddings.json', e);
+      }
+
+      // (B) Also compute embeddings for the user's recent mailbox emails (take latest 50)
+      try {
+          // Fetch recent mailbox emails for embedding context (not only unread)
+          let mailboxEmails = [];
+          try {
+            if (authState.provider === 'smtp' && smtpHandler && typeof smtpHandler.getRecentEmails === 'function') {
+              mailboxEmails = await smtpHandler.getRecentEmails(50);
+            } else if (authState.provider === 'gmail') {
+              mailboxEmails = await getRecentEmails(50);
+            } else {
+              // fallback to existing behavior (may return unread only)
+              mailboxEmails = await getEmailsBasedOnProvider();
+            }
+          } catch (e) {
+            console.error('[generateReply] failed to fetch recent mailbox emails, falling back to provider unread list', e);
+            mailboxEmails = await getEmailsBasedOnProvider();
+          }
+        if (Array.isArray(mailboxEmails) && mailboxEmails.length > 0 && emailEmb) {
+          // sort by date desc and take up to 50
+          const withTs = mailboxEmails.map(m => ({
+            ...m,
+            _ts: m.date ? new Date(m.date).getTime() : 0
+          }));
+          withTs.sort((a, b) => b._ts - a._ts);
+          const last50 = withTs.slice(0, 50);
+          const texts = last50.map(e => {
+            const subj = e.subject || '';
+            const from = e.from || '';
+            const body = e.body || '';
+            console.log('[generateReply] preparing mailbox email for embedding:', { subj, from, date: e.date, body });
+            return `Subject: ${subj}\nFrom: ${from}\nDate: ${e.date || ''}\n${body}`;
+          });
+
+          // request embeddings in batch (guard against empty inputs)
+          const batchInput = texts.map(t => safeTrim(t, 2000)); // limit per-email input
+          try {
+            const batchResp = await openai.embeddings.create({ model: modelForEmb, input: batchInput });
+            const mailEmbeddings = (batchResp && batchResp.data) ? batchResp.data.map(d => d.embedding) : [];
+            const scoredMail = mailEmbeddings.map((emb, idx) => ({ score: cosine(emailEmb, emb || []), item: last50[idx] }));
+            scoredMail.sort((a, b) => b.score - a.score);
+            const topMail = scoredMail.slice(0, 5).filter(s => s.item).map(s => `(${s.score.toFixed(3)}) From: ${s.item.from} | Subject: ${s.item.subject}\n${safeTrim(s.item.body || '', 800)}`);
+            if (topMail.length) embeddingsContext += 'Releváns korábbi emailek a postaládából:\n' + topMail.join('\n\n') + '\n\n';
+          } catch (e) {
+            console.error('[generateReply] failed to compute embeddings for recent mailbox emails', e);
+          }
+        }
+      } catch (e) {
+        console.error('[generateReply] mailbox embedding step failed', e);
+      }
+
+      // truncate the final embeddingsContext so we don't blow model context
+      if (embeddingsContext && embeddingsContext.length > 4000) {
+        embeddingsContext = embeddingsContext.slice(0, 4000) + '\n\n[...további bejegyzések levágva...]';
       }
     } catch (e) {
       console.error('[generateReply] failed to build embeddings context', e);
+    }
+
+    // Check for explicit license/identifier codes in the email body and image descriptions
+    let detectedCodesSection = '';
+    try {
+      const codes = new Set();
+      // from body
+      const bodyCodes = extractCodesFromText(email.body || '');
+      bodyCodes.forEach(c => codes.add(c));
+      // from image descriptions (if present)
+      const imgDescText = (email.aiImageResponses && Array.isArray(email.aiImageResponses))
+        ? email.aiImageResponses.map(r => JSON.stringify(r)).join('\n')
+        : imageDescriptions || '';
+      const imgCodes = extractCodesFromText(imgDescText);
+      imgCodes.forEach(c => codes.add(c));
+      if (codes.size > 0) {
+        const list = Array.from(codes).join(', ');
+        detectedCodesSection = `
+--Detected license/identifier codes found in the email (please include verbatim in the reply): ${list}\n\n`;
+        console.log('[generateReply] Detected codes in email:', list);
+      }
+    } catch (e) {
+      console.error('[generateReply] error while extracting codes from email', e);
     }
 
     // Debug logging to help diagnose large inputs
@@ -1443,14 +1604,15 @@ async function generateReply(email) {
       .replace('{imageDescriptions}', safeImageDescriptions)
       .replace('{excelImageDescriptions}', safeExcelImageDescriptions)
       .replace('{webUrls}', safeCombinedHtml || 'N/A')
-      .replace('{embeddingsContext}', embeddingsContext || '');
+      // prepend detected codes section to embeddingsContext so model sees them clearly
+      .replace('{embeddingsContext}', (detectedCodesSection || '') + (embeddingsContext || ''));
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { 
           role: "system", 
-          content: "Te egy segítőkész asszisztens vagy, aki udvarias és professzionális válaszokat ír az ügyfeleknek. Az Excel adatokat és a megadott html-ről szerzett információkat használd fel a válaszadáshoz, ha releváns információt találsz bennük. Az adatok különböző munkalapokról származnak, mindegyiket vedd figyelembe a válaszadásnál. Elsődlegesen a html-ről származó információkat használd, ezek lehetnek linkek, email címek , telefonszámok és így tovább." 
+          content: "Te egy segítőkész asszisztens vagy, aki udvarias és professzionális válaszokat ír az ügyfeleknek. Az Excel adatokat és a megadott html-ről szerzett információkat használd fel a válaszadáshoz, ha releváns információt találsz bennük. Az adatok különböző munkalapokról származnak, mindegyiket vedd figyelembe a válaszadásnál. Elsődlegesen a html-ről származó információkat használd, ezek lehetnek linkek, email címek, telefonszámok és így tovább. FONTOS: Ha a beérkezett levél tartalmaz licensz kódot vagy bármilyen azonosítót (pl. alfanumerikus kód), másold ki és add vissza pontosan (verbatim) a válaszban. Ha a kód a csatolt képen található, próbáld meg azt is felhasználni, ha az OCR-eredmény elérhető. Ne tagadd meg az adat közlését, ha az szerepel a levélben vagy a csatolt képekből kinyert tartalomban." 
         },
         { role: "user", content: finalPrompt }
       ],

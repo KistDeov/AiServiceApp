@@ -2,6 +2,5 @@ Fontos:
     - Windows ne dobja fel hogy futtatás mellőzése mert vírusnak hiszi
 Ráér:  
     - Lehessen több emailel bejelentkezni, úgymint a thunderbirdnél (Fiókok aloldal)
-    - Át állni céges (openai, github, vercel) fiókokra
     - Please review for production readiness check for common vulnerabilities, secure headers, forms, input validation, authentication, error handling, debug statements, dependency security, and ensure adherence to industry best practices.
 

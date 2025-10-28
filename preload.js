@@ -85,6 +85,8 @@ contextBridge.exposeInMainWorld('api', {
   checkInternet: () => ipcRenderer.invoke('check-internet'),
   getMinEmailDate: () => ipcRenderer.invoke('getMinEmailDate'),
   setMinEmailDate: (dateStr) => ipcRenderer.invoke('setMinEmailDate', dateStr),
+  setFromDate: (dateStr) => ipcRenderer.invoke('setFromDate', dateStr),
+  getFromDate: () => ipcRenderer.invoke('getFromDate'),
   isDemoOver: () => ipcRenderer.invoke('is-demo-over'),
   receive: (channel, callback) => ipcRenderer.on(channel, (_, data) => callback(data)),
   remove: (channel, callback) => ipcRenderer.removeListener(channel, callback),

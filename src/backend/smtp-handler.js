@@ -1,6 +1,8 @@
 import nodemailer from 'nodemailer';
 import Imap from 'imap';
 import { simpleParser } from 'mailparser';
+import fs from 'fs';
+import path from 'path';
 
 class SmtpEmailHandler {
   constructor(config) {
@@ -337,6 +339,115 @@ class SmtpEmailHandler {
             f.once('end', async () => {
               try {
                 await Promise.all(parsePromises); // VÁRUNK MINDEN PARSINGRA
+                emails.sort((a, b) => new Date(b.date) - new Date(a.date));
+                resolve(emails);
+              } catch (e) {
+                reject(e);
+              }
+            });
+          });
+        };
+
+        if (this.imap.state === 'authenticated' || this.imap.state === 'selected' || this.imap.state === 'connected') {
+          openInbox(processMailbox);
+        } else {
+          this.imap.once('ready', () => openInbox(processMailbox));
+          this.imap.once('error', reject);
+          this.imap.connect();
+        }
+      } catch (err) {
+        return reject(err);
+      }
+    });
+  }
+
+  // Return the most recent emails (regardless of read/unread). Limit optional.
+  async getRecentEmails(limit = 50) {
+    return new Promise((resolve, reject) => {
+      try {
+        if (!this.imap) {
+          return reject(new Error('IMAP connection is not established.'));
+        }
+        const emails = [];
+        const parsePromises = [];
+
+        const openInbox = (cb) => {
+          this.imap.openBox('INBOX', false, (err) => {
+            if (err) return reject(err);
+            cb();
+          });
+        };
+
+        const processMailbox = () => {
+          // Try to read `fromDate` from settings.json (format: YYYY-MM-DD)
+          // and convert it to IMAP search format (DD-MMM-YYYY) for SINCE.
+          let searchCriteria = ['ALL'];
+          try {
+            const settingsPath = path.resolve(process.cwd(), 'settings.json');
+            const raw = fs.readFileSync(settingsPath, 'utf8');
+            const settings = JSON.parse(raw);
+            const fromDateStr = settings?.fromDate;
+            if (fromDateStr && /^\d{4}-\d{2}-\d{2}$/.test(fromDateStr)) {
+              const [y, m, d] = fromDateStr.split('-');
+              const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+              const imapDate = `${parseInt(d, 10)}-${months[parseInt(m, 10) - 1]}-${y}`;
+              searchCriteria = ['SINCE', imapDate];
+            }
+          } catch (e) {
+            console.error('[AIServiceApp][smtp-handler.js] settings.json read error:', e.message);
+          }
+
+          this.imap.search(searchCriteria, (err, results) => {
+            if (err) return reject(err);
+
+            if (!results.length) {
+              return resolve([]);
+            }
+
+            const limited = results.slice(-limit);
+
+            const f = this.imap.fetch(limited, {
+              bodies: '',
+              struct: true,
+              markSeen: false,
+              uid: true
+            });
+
+            f.on('message', (msg) => {
+              let raw = '';
+              let uid = null;
+
+              msg.on('attributes', attrs => {
+                uid = attrs.uid;
+              });
+
+              msg.on('body', (stream) => {
+                stream.on('data', chunk => raw += chunk.toString('utf8'));
+              });
+
+              msg.once('end', () => {
+                const p = simpleParser(raw)
+                  .then(parsed => {
+                    emails.push({
+                      id: uid,
+                      from: parsed.from?.text || '',
+                      subject: parsed.subject || '',
+                      date: parsed.date ? parsed.date.toISOString() : '',
+                      body: parsed.text || '',
+                      html: parsed.html || null,
+                      text: parsed.text || '',
+                      snippet: (parsed.text || '').slice(0, 100)
+                    });
+                  })
+                  .catch(e => console.error('Mail parse hiba (recent):', e));
+                parsePromises.push(p);
+              });
+            });
+
+            f.once('error', err => reject(err));
+            f.once('end', async () => {
+              try {
+                await Promise.all(parsePromises);
                 emails.sort((a, b) => new Date(b.date) - new Date(a.date));
                 resolve(emails);
               } catch (e) {

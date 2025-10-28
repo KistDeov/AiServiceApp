@@ -3,6 +3,8 @@ import { google } from 'googleapis';
 import { htmlToText } from 'html-to-text';
 import axios from 'axios';
 import { getSecret } from './src/utils/keytarHelper.js';
+import fs from 'fs';
+import path from 'path';
 
 function decodeRFC2047(subject) {
   return subject.replace(/=\?([^?]+)\?([BbQq])\?([^?]+)\?=/g, (match, charset, encoding, text) => {
@@ -51,6 +53,111 @@ export async function getUnreadEmails() {
         from: headers['From'],
         subject: headers['Subject'] ? decodeRFC2047(headers['Subject']) : '',
         date: headers['Date'],
+        snippet: full.data.snippet,
+      };
+    })
+  );
+
+  return detailed;
+}
+
+export async function getRecentEmails(maxResults = 50) {
+  const auth = await authorize();
+  const gmail = google.gmail({ version: 'v1', auth });
+
+  // Try to read `fromDate` from settings.json (format expected: YYYY-MM-DD).
+  // We interpret `fromDate` as the earliest date to load emails from (i.e. "from this date until now").
+  let listParams = { userId: 'me', maxResults };
+  try {
+    const settingsPath = path.resolve(process.cwd(), 'settings.json');
+    const raw = fs.readFileSync(settingsPath, 'utf8');
+    const settings = JSON.parse(raw);
+    const fromDateStr = settings?.fromDate;
+    if (fromDateStr && /^\d{4}-\d{2}-\d{2}$/.test(fromDateStr)) {
+      const parts = fromDateStr.split('-');
+      // Gmail search uses YYYY/MM/DD format for date queries
+      const gmailDate = `${parts[0]}/${parts[1]}/${parts[2]}`;
+      // Use `after:` to get messages from the given date (inclusive behavior depends on Gmail but this is the common approach)
+      listParams.q = `after:${gmailDate}`;
+    }
+  } catch (e) {
+    // If settings can't be read or parsed, silently continue with default behavior
+    console.error('[AIServiceApp][gmail.js] settings.json read error:', e.message);
+  }
+
+  const res = await gmail.users.messages.list(listParams);
+
+  const messages = res.data.messages || [];
+
+  // Helper to extract a readable body from the MIME payload (text/plain preferred,
+  // fallback to text/html converted to text). This mirrors the logic used in getEmailById.
+  function extractBodyFromPayload(payload) {
+    function isUnsupportedHtmlMessage(text) {
+      const lower = text.toLowerCase();
+      return lower.includes('html formátumot támogató levelező kliens szükséges');
+    }
+
+    function findTextPart(part) {
+      if (!part) return null;
+      if (part.mimeType === 'text/plain' && part.body && part.body.data) {
+        const text = Buffer.from(part.body.data, 'base64').toString('utf8');
+        if (isUnsupportedHtmlMessage(text)) {
+          return 'A levelező nem tudja megnyitni a levél teljes tartalmát (valószínűleg spam vagy hírlevél).';
+        }
+        return text;
+      }
+      if (part.mimeType === 'text/html' && part.body && part.body.data) {
+        const html = Buffer.from(part.body.data, 'base64').toString('utf8');
+        const text = htmlToText(html);
+        if (isUnsupportedHtmlMessage(text)) {
+          return 'A levelező nem tudja megnyitni a levél teljes tartalmát (valószínűleg spam vagy hírlevél).';
+        }
+        return text;
+      }
+      if (part.parts && Array.isArray(part.parts)) {
+        for (const subPart of part.parts) {
+          const found = findTextPart(subPart);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+
+    const found = findTextPart(payload);
+    if (found) return found;
+    if (payload.body && payload.body.data) {
+      const decoded = Buffer.from(payload.body.data, 'base64').toString('utf8');
+      const text = payload.mimeType === 'text/html' ? htmlToText(decoded) : decoded;
+      if (isUnsupportedHtmlMessage(text)) {
+        return 'A levelező nem tudja megnyitni a levél teljes tartalmát (valószínűleg spam vagy hírlevél).';
+      }
+      return text;
+    }
+    return '(nincs tartalom)';
+  }
+
+  const detailed = await Promise.all(
+    messages.map(async (msg) => {
+      // Fetch full message so we can extract the body
+      const full = await gmail.users.messages.get({
+        userId: 'me',
+        id: msg.id,
+        format: 'full',
+      });
+
+      const headers = (full.data.payload.headers || []).reduce((acc, h) => {
+        acc[h.name] = h.value;
+        return acc;
+      }, {});
+
+      const body = extractBodyFromPayload(full.data.payload);
+
+      return {
+        id: msg.id,
+        from: headers['From'],
+        subject: headers['Subject'] ? decodeRFC2047(headers['Subject']) : '',
+        date: headers['Date'],
+        body,
         snippet: full.data.snippet,
       };
     })

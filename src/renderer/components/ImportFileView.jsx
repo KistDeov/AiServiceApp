@@ -300,7 +300,7 @@ const ImportFileView = ({ showSnackbar }) => {
         <Tab label="Weboldalak" value="websites" />
         <Tab label="Adatbázis feltöltés" value="excel" />
         <Tab label="Adatbázis szerkesztés" value="editor" />
-        <Tab label="Fájl importálás" value="file_import" />
+        <Tab label="Mappa feltöltés" value="file_import" />
       </Tabs>
 
       <Box>
@@ -414,8 +414,8 @@ const ImportFileView = ({ showSnackbar }) => {
 
         {section === 'file_import' && (
          <Paper variant="outlined" sx={{ p: 4, mt: 1, bgcolor: '#181818', color: 'white', borderRadius: 1, boxShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
-            <Typography variant="h5" gutterBottom sx={{ color: 'white', textAlign: 'center' }}>Fájlok / Mappa importálása és embedding készítése</Typography>
-            <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.75)', textAlign: 'center', mb: 2 }}>Válassz ki egy mappát — a program rekurzívan feldolgozza a .txt, .csv és .xlsx fájlokat, kinyeri a szöveget és OpenAI embeddinget készít róla.</Typography>
+            <Typography variant="h5" gutterBottom sx={{ color: 'white', textAlign: 'center' }}>Mappa feltöltése</Typography>
+            <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.75)', textAlign: 'center', mb: 2 }}>Válassz ki egy mappát — a program feldolgozza a benne lévő .txt, .csv és .xlsx fájlokat, kinyeri a szöveget és előkészíti az AI-nak.</Typography>
 
             <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
               <Button variant="contained" onClick={async () => {
@@ -438,19 +438,19 @@ const ImportFileView = ({ showSnackbar }) => {
                 try {
                   const result = await window.api.importFolderForEmbeddings?.({ dirPath: selectedFileName });
                   if (result && result.success) {
-                    showSnackbar(`Import kész — ${result.count} embedding mentve.`, 'success');
+                    showSnackbar(`Feltöltés kész.`, 'success');
                     setUploadedFilePath(result.embeddingsPath || '');
                   } else {
                     showSnackbar(`Hiba: ${result?.error || 'Ismeretlen hiba'}`, 'error');
                   }
                 } catch (e) {
                   console.error('Import error', e);
-                  showSnackbar('Hiba történt az import során!', 'error');
+                  showSnackbar('Hiba történt a feltöltés során!', 'error');
                 } finally {
                   setSaving(false);
                 }
               }} disabled={!selectedFileName || saving} sx={{ bgcolor: '#00b894', color: '#000', '&:hover': { bgcolor: '#33d9b2' } }}>
-                {saving ? 'Importálás...' : 'Import indítása'}
+                {saving ? 'Feltöltés...' : 'Feltöltés indítása'}
               </Button>
             </Box>
 
