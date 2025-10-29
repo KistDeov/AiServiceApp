@@ -318,7 +318,7 @@ const GeneratedMailsView = ({ showSnackbar }) => {
                 label="Üzenet"
                 variant="outlined"
                 multiline
-                rows={10}
+                rows={15}
                 sx={{ mt: 2 }}
                 value={replyBody}
                 onChange={(e) => setReplyBody(e.target.value)}

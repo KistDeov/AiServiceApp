@@ -322,7 +322,7 @@ const SheetEditorView = ({ showSnackbar, embedded = false, onClose }) => {
           {/* Sticky footer with action buttons so they remain visible */}
           <Box sx={{ position: 'sticky', bottom: 0, zIndex: 10, bgcolor: '#181818', borderTop: '1px solid rgba(255,255,255,0.04)', p: 2, display: 'flex', gap: 2, justifyContent: 'center' }}>
             <Button variant="contained" onClick={() => setConfirmExportOpen(true)} disabled={saving} sx={{ bgcolor: '#ffd400', color: '#000', '&:hover': { bgcolor: '#ffdb4d' }, minWidth: 160 }}>
-              {saving ? 'Mentés...' : 'Exportálás Excelbe'}
+              {saving ? 'Mentés...' : 'Mentés'}
             </Button>
             <Button variant="outlined" onClick={handleAddSheet} sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)', minWidth: 140 }} disabled={excelSheets.length >= MAX_SHEETS}>Új munkalap</Button>
             <Button variant="outlined" onClick={() => openRename(activeSheetIndex)} sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)', minWidth: 120 }}>Átnevez</Button>

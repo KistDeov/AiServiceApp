@@ -948,7 +948,7 @@ const App = () => {
         }}
       >
         {/* Középre pontosan igazított ikonok */}
-        <Box sx={{ display: 'flex', gap: 4, position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
+        <Box sx={{ display: 'flex', gap: 2, position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
           <IconButton onClick={() => setActiveView('home')} color={activeView === 'home' ? 'default' : 'inherit'} sx={{ color: 'text.primary' }}>
             <FaHome size={22} />
           </IconButton>
@@ -1006,7 +1006,7 @@ const App = () => {
   />
         </Box>
         {/* Jobbra igazított ikonok */}
-        <Box sx={{ display: 'flex', gap: 4, position: 'absolute', right: 32 }}>
+        <Box sx={{ display: 'flex', gap: 1, position: 'absolute', right: 32 }}>
           {/* <FaDotCircle /> -- EZT TÖRÖLD, mert most már külön van */}
           <IconButton onClick={() => setActiveView('help')} color={activeView === 'help' ? 'default' : 'inherit'} sx={{ color: 'text.primary' }}>
             <FaRegQuestionCircle size={22} />
@@ -1101,7 +1101,7 @@ const App = () => {
               onMouseLeave={handleDrawerMouseLeave}
             >
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', p: 1 }}>
-                <Typography variant='caption' sx={{ mr: 9 }}>Verzió: 1.2.0</Typography>
+                <Typography variant='caption' sx={{ mr: 9 }}>Verzió: 1.2.1</Typography>
                 <IconButton onClick={handlePinClick} size="small" color={isPinned ? 'error' : 'default'}>
                   {isPinned ? (
                     <FaTimesCircle size={20} color="#d32f2f" />
