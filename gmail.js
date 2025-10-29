@@ -2,6 +2,7 @@ import { authorize } from './src/backend/auth.js';
 import { google } from 'googleapis';
 import { htmlToText } from 'html-to-text';
 import axios from 'axios';
+import * as cheerio from 'cheerio';
 import { getSecret } from './src/utils/keytarHelper.js';
 import fs from 'fs';
 import path from 'path';
@@ -20,6 +21,41 @@ function decodeRFC2047(subject) {
     }
     return text;
   });
+}
+
+// Convert HTML to text but preserve <table> contents in a machine-friendly tab/CSV-like form.
+function htmlToTextWithTables(html) {
+  try {
+    // Basic textual conversion
+    let text = htmlToText(html, { wordwrap: 130 });
+    let $ = null;
+    try { $ = cheerio.load(html); } catch (e) { $ = null; }
+    if ($) {
+      const tables = $('table');
+      if (tables.length > 0) {
+        text += '\n\n[TABLES]\n';
+        tables.each((ti, table) => {
+          const rows = [];
+          $(table).find('tr').each((ri, tr) => {
+            const cells = [];
+            $(tr).find('th,td').each((ci, cell) => {
+              let cellText = $(cell).text().trim().replace(/\s+/g, ' ');
+              // Replace newlines inside a cell with space to keep rows intact
+              cellText = cellText.replace(/\n+/g, ' ');
+              cells.push(cellText);
+            });
+            if (cells.length) rows.push(cells.join('\t'));
+          });
+          if (rows.length) {
+            text += `Table ${ti + 1}:\n` + rows.join('\n') + '\n\n';
+          }
+        });
+      }
+    }
+    return text;
+  } catch (e) {
+    try { return htmlToText(html); } catch { return '(html parsing error)'; }
+  }
 }
 
 export async function getUnreadEmails() {
@@ -58,16 +94,39 @@ export async function getUnreadEmails() {
     })
   );
 
+  // Apply explicit fromDate post-filter: keep emails whose Date header is >= start of fromDate
+  try {
+    const settingsPath = path.resolve(process.cwd(), 'settings.json');
+    const raw = fs.readFileSync(settingsPath, 'utf8');
+    const settings = JSON.parse(raw);
+    const fromDateStr = settings?.fromDate;
+    if (fromDateStr && /^\d{4}-\d{2}-\d{2}$/.test(fromDateStr)) {
+      const parts = fromDateStr.split('-');
+      const startDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+      // Normalize to start of day
+      startDate.setHours(0, 0, 0, 0);
+      const filtered = detailed.filter(d => {
+        try {
+          const msgDate = d.date ? new Date(d.date) : null;
+          return msgDate && !isNaN(msgDate) && msgDate >= startDate;
+        } catch (e) { return false; }
+      });
+      return filtered;
+    }
+  } catch (e) {
+    console.error('[AIServiceApp][gmail.js] settings.json read error (post-filter):', e.message);
+  }
+
   return detailed;
 }
 
-export async function getRecentEmails(maxResults = 50) {
+export async function getRecentEmails() {
   const auth = await authorize();
   const gmail = google.gmail({ version: 'v1', auth });
-
   // Try to read `fromDate` from settings.json (format expected: YYYY-MM-DD).
   // We interpret `fromDate` as the earliest date to load emails from (i.e. "from this date until now").
-  let listParams = { userId: 'me', maxResults };
+  // We'll page through results to collect ALL messages matching the criteria (respecting Gmail paging).
+  let listParams = { userId: 'me', maxResults: 100 }; // page size for listing
   try {
     const settingsPath = path.resolve(process.cwd(), 'settings.json');
     const raw = fs.readFileSync(settingsPath, 'utf8');
@@ -85,9 +144,21 @@ export async function getRecentEmails(maxResults = 50) {
     console.error('[AIServiceApp][gmail.js] settings.json read error:', e.message);
   }
 
-  const res = await gmail.users.messages.list(listParams);
-
-  const messages = res.data.messages || [];
+  // Page through all results and aggregate messages
+  let messages = [];
+  try {
+    let nextPageToken = null;
+    do {
+      if (nextPageToken) listParams.pageToken = nextPageToken;
+      const res = await gmail.users.messages.list(listParams);
+      const pageMsgs = res.data.messages || [];
+      messages.push(...pageMsgs);
+      nextPageToken = res.data.nextPageToken;
+    } while (nextPageToken);
+  } catch (e) {
+    console.error('[AIServiceApp][gmail.js] Error listing messages:', e.message);
+    messages = []; // fallback to empty
+  }
 
   // Helper to extract a readable body from the MIME payload (text/plain preferred,
   // fallback to text/html converted to text). This mirrors the logic used in getEmailById.
@@ -108,7 +179,7 @@ export async function getRecentEmails(maxResults = 50) {
       }
       if (part.mimeType === 'text/html' && part.body && part.body.data) {
         const html = Buffer.from(part.body.data, 'base64').toString('utf8');
-        const text = htmlToText(html);
+        const text = htmlToTextWithTables(html);
         if (isUnsupportedHtmlMessage(text)) {
           return 'A levelező nem tudja megnyitni a levél teljes tartalmát (valószínűleg spam vagy hírlevél).';
         }
@@ -158,7 +229,8 @@ export async function getRecentEmails(maxResults = 50) {
         subject: headers['Subject'] ? decodeRFC2047(headers['Subject']) : '',
         date: headers['Date'],
         body,
-        snippet: full.data.snippet,
+        // Use the extracted full body as snippet so the client receives the complete content (no truncation)
+        snippet: body,
       };
     })
   );
@@ -244,7 +316,7 @@ function extractBody(payload) {
     // Utána text/html
     if (part.mimeType === 'text/html' && part.body && part.body.data) {
       const html = Buffer.from(part.body.data, 'base64').toString('utf8');
-      const text = htmlToText(html);
+      const text = htmlToTextWithTables(html);
       if (isUnsupportedHtmlMessage(text)) {
         return 'A levelező nem tudja megnyitni a levél teljes tartalmát (valószínűleg spam vagy hírlevél).';
       }

@@ -362,7 +362,7 @@ class SmtpEmailHandler {
   }
 
   // Return the most recent emails (regardless of read/unread). Limit optional.
-  async getRecentEmails(limit = 50) {
+  async getRecentEmails(limit = null) {
     return new Promise((resolve, reject) => {
       try {
         if (!this.imap) {
@@ -404,7 +404,7 @@ class SmtpEmailHandler {
               return resolve([]);
             }
 
-            const limited = results.slice(-limit);
+            const limited = (limit && limit > 0) ? results.slice(-limit) : results;
 
             const f = this.imap.fetch(limited, {
               bodies: '',
@@ -436,7 +436,8 @@ class SmtpEmailHandler {
                       body: parsed.text || '',
                       html: parsed.html || null,
                       text: parsed.text || '',
-                      snippet: (parsed.text || '').slice(0, 100)
+                      // Return the full text as snippet (no truncation)
+                      snippet: parsed.text || ''
                     });
                   })
                   .catch(e => console.error('Mail parse hiba (recent):', e));
@@ -448,6 +449,30 @@ class SmtpEmailHandler {
             f.once('end', async () => {
               try {
                 await Promise.all(parsePromises);
+                // Filter by settings.fromDate (keep emails from that date up to now)
+                try {
+                  const settingsPath = path.resolve(process.cwd(), 'settings.json');
+                  const raw = fs.readFileSync(settingsPath, 'utf8');
+                  const settings = JSON.parse(raw);
+                  const fromDateStr = settings?.fromDate;
+                  if (fromDateStr && /^\d{4}-\d{2}-\d{2}$/.test(fromDateStr)) {
+                    const [y, m, d] = fromDateStr.split('-');
+                    const startDate = new Date(Number(y), Number(m) - 1, Number(d));
+                    startDate.setHours(0,0,0,0);
+                    const filtered = emails.filter(e => {
+                      try {
+                        const ed = e.date ? new Date(e.date) : null;
+                        return ed && !isNaN(ed) && ed >= startDate;
+                      } catch (ex) { return false; }
+                    });
+                    filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+                    resolve(filtered);
+                    return;
+                  }
+                } catch (pfErr) {
+                  console.error('[AIServiceApp][smtp-handler.js] settings.json read error (post-filter):', pfErr.message);
+                }
+
                 emails.sort((a, b) => new Date(b.date) - new Date(a.date));
                 resolve(emails);
               } catch (e) {

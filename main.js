@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { app, BrowserWindow, ipcMain, dialog, shell, webContents} from 'electron';
 import { getUnreadEmails, getEmailById, getRecentEmails } from './gmail.js';
 import { OpenAI } from 'openai';
+import KB from './src/backend/kb-manager.js';
 import XLSX from 'xlsx';
 import { authorize } from './src/backend/auth.js';
 import { google } from 'googleapis';
@@ -946,7 +947,10 @@ ipcMain.handle('show-directory-dialog', async () => {
 });
 
 // Import a folder recursively, extract text from supported files and generate embeddings
-ipcMain.handle('import-folder-embeddings', async (event, { dirPath, model = 'text-embedding-3-small', maxChunkChars = 3000 } = {}) => {
+// Note: maxChunkChars default increased substantially to avoid aggressive
+// splitting. Large values may increase embedding API cost; consider lowering
+// or adding a user setting if needed.
+ipcMain.handle('import-folder-embeddings', async (event, { dirPath, model = 'text-embedding-3-small', maxChunkChars = 120000 } = {}) => {
   try {
     if (!dirPath || !fs.existsSync(dirPath)) {
       return { success: false, error: 'Directory does not exist' };
@@ -1046,7 +1050,9 @@ ipcMain.handle('import-folder-embeddings', async (event, { dirPath, model = 'tex
           BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, chunkIndex: ci + 1, totalChunks: chunks.length, status: 'embedding' }));
           const resp = await openai.embeddings.create({ model, input: chunk });
           const emb = resp?.data && resp.data[0] && resp.data[0].embedding ? resp.data[0].embedding : null;
-          embeddingsOut.push({ id: `${fi}-${ci}`, file, chunkIndex: ci, textSnippet: chunk.slice(0, 200), embedding: emb });
+          // Keep the full chunk as textSnippet (no arbitrary small truncation).
+          // The chunk length is bounded by maxChunkChars above.
+          embeddingsOut.push({ id: `${fi}-${ci}`, file, chunkIndex: ci, textSnippet: chunk, embedding: emb });
         } catch (embErr) {
           console.error('[import-folder-embeddings] embedding error for', file, embErr);
           BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, chunkIndex: ci + 1, totalChunks: chunks.length, status: 'error', error: embErr?.message || String(embErr) }));
@@ -1262,6 +1268,62 @@ ipcMain.handle('saveWebSettings', async (event, { webUrls }) => {
 // Added {embeddingsContext} placeholder so we can inject nearest-file snippets from the imported embeddings
 let promptBase = `Egy ügyféltől a következő email érkezett:\n\n{greeting}\n\n"{email.body}"\n\n{imageDescriptions}\n\n{excelImageDescriptions}\n\nA következő adatokat használd fel a válaszadáshoz:\n{excelData}\n\n{signature}\n\n{webUrls}\n{embeddingsContext}\nEzekről a htmlek-ről is gyűjtsd ki a szükséges információkat a válaszadáshoz: {webUrls}, gyűjts ki a szükséges információkat, linkeket, telefonszámokat, email címeket és így tovább és ezeket küldd vissza.\n\n`;
 
+// Safe embedding helper: try to embed the full text, but if the call fails
+// (commonly due to input size), split the text into smaller subchunks and
+// average their embeddings. Uses the global `openai` instance.
+async function safeCreateEmbedding(model, text) {
+  if (!text) return null;
+  const SLEEP = (ms) => new Promise(r => setTimeout(r, ms));
+  try {
+    const resp = await openai.embeddings.create({ model, input: String(text) });
+    return resp?.data?.[0]?.embedding || null;
+  } catch (err) {
+    console.error('[safeCreateEmbedding] full text embed failed, will try sub-chunks:', err && err.message ? err.message : err);
+    // split into safe sub-chunks and embed each, then average
+    try {
+      const SUB_CHUNK = 2000; // chars per subchunk
+      const parts = [];
+      for (let i = 0; i < String(text).length; i += SUB_CHUNK) parts.push(String(text).slice(i, i + SUB_CHUNK));
+      if (!parts.length) return null;
+      const embeddings = [];
+      for (let i = 0; i < parts.length; i += 20) {
+        const batch = parts.slice(i, i + 20);
+        try {
+          const r = await openai.embeddings.create({ model, input: batch });
+          const data = (r && r.data) ? r.data.map(d => d.embedding) : [];
+          for (const v of data) embeddings.push(v);
+        } catch (be) {
+          console.error('[safeCreateEmbedding] sub-batch embed failed:', be && be.message ? be.message : be);
+          // try each part individually if batch fails
+          for (const part of batch) {
+            try {
+              const rr = await openai.embeddings.create({ model, input: part });
+              const dv = rr?.data?.[0]?.embedding;
+              if (dv) embeddings.push(dv);
+            } catch (e2) {
+              console.error('[safeCreateEmbedding] single subchunk embed failed:', e2 && e2.message ? e2.message : e2);
+            }
+            await SLEEP(100);
+          }
+        }
+        await SLEEP(100);
+      }
+      if (!embeddings.length) return null;
+      // average embeddings
+      const len = embeddings.length;
+      const out = new Array(embeddings[0].length).fill(0);
+      for (const vec of embeddings) {
+        for (let k = 0; k < vec.length; k++) out[k] += vec[k] || 0;
+      }
+      for (let k = 0; k < out.length; k++) out[k] = out[k] / len;
+      return out;
+    } catch (ex) {
+      console.error('[safeCreateEmbedding] failed to create embedding via subchunks:', ex && ex.message ? ex.message : ex);
+      return null;
+    }
+  }
+}
+
 async function generateReply(email) {
   try {
     // Ensure we have full email body: always try to fetch the full email by id when available.
@@ -1406,8 +1468,11 @@ async function generateReply(email) {
       return text.slice(0, maxChars) + '\n\n[...további tartalom levágva...]';
     }
 
-    const SAFE_HTML_MAX_CHARS = 20000; // ~5k tokens upper-bound approximation
-    const SAFE_EXCEL_MAX_CHARS = 8000;
+  // Increased safety limits to reduce accidental truncation of large emails/tables.
+  // WARNING: raising these values may increase token usage and cost when the prompt is sent
+  // to the model. Consider enabling the file-based KB / summary pipeline if cost is a concern.
+  const SAFE_HTML_MAX_CHARS = 100000; // allow much larger HTML bodies (~25k tokens approximation)
+  const SAFE_EXCEL_MAX_CHARS = 40000;
     const SAFE_IMAGE_DESC_MAX_CHARS = 3000;
 
     const safeCombinedHtml = safeTrim(combinedHtml || '', SAFE_HTML_MAX_CHARS);
@@ -1438,10 +1503,10 @@ async function generateReply(email) {
       // compute embedding for the incoming email (used as query)
       let emailEmb = null;
       try {
-        const embResp = await openai.embeddings.create({ model: modelForEmb, input: String(email.body || email.subject || '') });
-        emailEmb = embResp?.data?.[0]?.embedding || null;
+        emailEmb = await safeCreateEmbedding(modelForEmb, String(email.body || email.subject || ''));
       } catch (e) {
         console.error('[generateReply] failed to compute embedding for incoming email', e);
+        emailEmb = null;
       }
 
       const cosine = (a, b) => {
@@ -1501,72 +1566,63 @@ async function generateReply(email) {
         console.error('[generateReply] failed to read embeddings.json', e);
       }
 
-      // (B) Also compute embeddings for the user's recent mailbox emails (take latest 50)
+      // (B) Use file-based KB: ensure mailbox emails are indexed and query local KB for relevant snippets
       try {
-          // Fetch recent mailbox emails for embedding context (not only unread)
-          let mailboxEmails = [];
-          try {
-            if (authState.provider === 'smtp' && smtpHandler && typeof smtpHandler.getRecentEmails === 'function') {
-              mailboxEmails = await smtpHandler.getRecentEmails(50);
-            } else if (authState.provider === 'gmail') {
-              mailboxEmails = await getRecentEmails(50);
-            } else {
-              // fallback to existing behavior (may return unread only)
-              mailboxEmails = await getEmailsBasedOnProvider();
-            }
-          } catch (e) {
-            console.error('[generateReply] failed to fetch recent mailbox emails, falling back to provider unread list', e);
+        // Fetch recent mailbox emails for embedding context (not only unread)
+        let mailboxEmails = [];
+        try {
+          if (authState.provider === 'smtp' && smtpHandler && typeof smtpHandler.getRecentEmails === 'function') {
+            mailboxEmails = await smtpHandler.getRecentEmails();
+          } else if (authState.provider === 'gmail') {
+            mailboxEmails = await getRecentEmails();
+          } else {
             mailboxEmails = await getEmailsBasedOnProvider();
           }
-        if (Array.isArray(mailboxEmails) && mailboxEmails.length > 0 && emailEmb) {
-          // sort by date desc and take up to 50
-          const withTs = mailboxEmails.map(m => ({
-            ...m,
-            _ts: m.date ? new Date(m.date).getTime() : 0
-          }));
-          withTs.sort((a, b) => b._ts - a._ts);
-          const last50 = withTs.slice(0, 50);
-          const texts = last50.map(e => {
-            const subj = e.subject || '';
-            const from = e.from || '';
-            const body = e.body || '';
-            console.log('[generateReply] preparing mailbox email for embedding:', { subj, from, date: e.date, body });
-            return `Subject: ${subj}\nFrom: ${from}\nDate: ${e.date || ''}\n${body}`;
-          });
+        } catch (e) {
+          console.error('[generateReply] failed to fetch recent mailbox emails, falling back to provider unread list', e);
+          mailboxEmails = await getEmailsBasedOnProvider();
+        }
 
-          // request embeddings in batch (guard against empty inputs)
-          const batchInput = texts.map(t => safeTrim(t, 2000)); // limit per-email input
+        if (Array.isArray(mailboxEmails) && mailboxEmails.length > 0 && emailEmb) {
           try {
-            const batchResp = await openai.embeddings.create({ model: modelForEmb, input: batchInput });
-            const mailEmbeddings = (batchResp && batchResp.data) ? batchResp.data.map(d => d.embedding) : [];
-            const scoredMail = mailEmbeddings.map((emb, idx) => ({ score: cosine(emailEmb, emb || []), item: last50[idx] }));
-            scoredMail.sort((a, b) => b.score - a.score);
-            const topMail = scoredMail.slice(0, 5).filter(s => s.item).map(s => `(${s.score.toFixed(3)}) From: ${s.item.from} | Subject: ${s.item.subject}\n${safeTrim(s.item.body || '', 800)}`);
-            if (topMail.length) embeddingsContext += 'Releváns korábbi emailek a postaládából:\n' + topMail.join('\n\n') + '\n\n';
+            // Add any new emails/chunks to the local KB (embeds only new chunks)
+            // Do this asynchronously in background to avoid blocking reply generation and unexpected cost during reply.
+            KB.addEmails(mailboxEmails)
+              .then(added => console.log('[generateReply] KB.addEmails result (async):', added))
+              .catch(err => console.error('[generateReply] KB.addEmails failed (async):', err));
           } catch (e) {
-            console.error('[generateReply] failed to compute embeddings for recent mailbox emails', e);
+            console.error('[generateReply] KB.addEmails launch failed:', e);
+          }
+
+          try {
+            const kbMatches = await KB.queryByEmbedding(emailEmb, 200);
+            if (Array.isArray(kbMatches) && kbMatches.length) {
+              const snippets = kbMatches.map(s => `(${s.score.toFixed(3)}) From: ${s.from} | Subject: ${s.subject}\n${safeTrim(s.text || '', 800)}`);
+              embeddingsContext += 'Releváns korábbi emailek a postaládából:\n' + snippets.join('\n\n') + '\n\n';
+            }
+          } catch (e) {
+            console.error('[generateReply] KB.queryByEmbedding failed:', e);
           }
         }
       } catch (e) {
-        console.error('[generateReply] mailbox embedding step failed', e);
+        console.error('[generateReply] mailbox embedding (KB) step failed', e);
       }
 
       // truncate the final embeddingsContext so we don't blow model context
-      if (embeddingsContext && embeddingsContext.length > 4000) {
-        embeddingsContext = embeddingsContext.slice(0, 4000) + '\n\n[...további bejegyzések levágva...]';
+      // Allow a larger embeddingsContext to reduce missing context; still cap to avoid hitting extreme limits
+      if (embeddingsContext && embeddingsContext.length > 20000) {
+        embeddingsContext = embeddingsContext.slice(0, 20000) + '\n\n[...további bejegyzések levágva...]';
       }
     } catch (e) {
       console.error('[generateReply] failed to build embeddings context', e);
     }
 
     // Check for explicit license/identifier codes in the email body and image descriptions
-    let detectedCodesSection = '';
+    // NOTE: we log detected codes for auditing, but DO NOT inject them verbatim into the model prompt
     try {
       const codes = new Set();
-      // from body
       const bodyCodes = extractCodesFromText(email.body || '');
       bodyCodes.forEach(c => codes.add(c));
-      // from image descriptions (if present)
       const imgDescText = (email.aiImageResponses && Array.isArray(email.aiImageResponses))
         ? email.aiImageResponses.map(r => JSON.stringify(r)).join('\n')
         : imageDescriptions || '';
@@ -1574,9 +1630,10 @@ async function generateReply(email) {
       imgCodes.forEach(c => codes.add(c));
       if (codes.size > 0) {
         const list = Array.from(codes).join(', ');
-        detectedCodesSection = `
---Detected license/identifier codes found in the email (please include verbatim in the reply): ${list}\n\n`;
-        console.log('[generateReply] Detected codes in email:', list);
+        // Keep as a log only — DO NOT include verbatim codes in the prompt to avoid leakage/over-sharing
+        console.log('[generateReply] Detected codes in email (logged only, not added to prompt):', list);
+        // Also write to KB / app log for auditing
+        try { logToFile(`[detected-codes] ${list}`); } catch (e) { /* ignore logging errors */ }
       }
     } catch (e) {
       console.error('[generateReply] error while extracting codes from email', e);
@@ -1604,21 +1661,38 @@ async function generateReply(email) {
       .replace('{imageDescriptions}', safeImageDescriptions)
       .replace('{excelImageDescriptions}', safeExcelImageDescriptions)
       .replace('{webUrls}', safeCombinedHtml || 'N/A')
-      // prepend detected codes section to embeddingsContext so model sees them clearly
-      .replace('{embeddingsContext}', (detectedCodesSection || '') + (embeddingsContext || ''));
+      // NOTE: do NOT prepend detected codes verbatim to embeddingsContext. Keep embeddingsContext only.
+      .replace('{embeddingsContext}', (embeddingsContext || ''));
+    // Call the OpenAI chat completion and add robust logging and fallback handling
+    try {
+      console.log('[generateReply] Sending prompt to OpenAI, prompt length (chars):', finalPrompt.length);
+      const completion = await openai.chat.completions.create({
+        model: "gpt-5-mini",
+        messages: [
+          { 
+            role: "system", 
+            content: "Te egy segítőkész asszisztens vagy, aki udvarias és professzionális válaszokat ír az ügyfeleknek. Az Excel adatokat és a megadott html-ről szerzett információkat használd fel a válaszadáshoz, ha releváns információt találsz bennük. Az adatok különböző munkalapokról származnak, mindegyiket vedd figyelembe a válaszadásnál. Elsődlegesen a html-ről származó információkat használd, ezek lehetnek linkek, email címek, telefonszámok és így tovább." 
+          },
+          { role: "user", content: finalPrompt }
+        ],
+        temperature: 1,
+      });
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-5",
-      messages: [
-        { 
-          role: "system", 
-          content: "Te egy segítőkész asszisztens vagy, aki udvarias és professzionális válaszokat ír az ügyfeleknek. Az Excel adatokat és a megadott html-ről szerzett információkat használd fel a válaszadáshoz, ha releváns információt találsz bennük. Az adatok különböző munkalapokról származnak, mindegyiket vedd figyelembe a válaszadásnál. Elsődlegesen a html-ről származó információkat használd, ezek lehetnek linkek, email címek, telefonszámok és így tovább. FONTOS: Ha a beérkezett levél tartalmaz licensz kódot vagy bármilyen azonosítót (pl. alfanumerikus kód), másold ki és add vissza pontosan (verbatim) a válaszban. Ha a kód a csatolt képen található, próbáld meg azt is felhasználni, ha az OCR-eredmény elérhető. Ne tagadd meg az adat közlését, ha az szerepel a levélben vagy a csatolt képekből kinyert tartalomban." 
-        },
-        { role: "user", content: finalPrompt }
-      ],
-      temperature: 1,
-    });
-    return completion.choices[0].message.content;
+      // Log the raw response for debugging (size-aware)
+      try { console.log('[generateReply] OpenAI raw response keys:', Object.keys(completion || {})); } catch (e) {}
+      try { logToFile('[generateReply] OpenAI response: ' + JSON.stringify({ choicesCount: completion?.choices?.length ?? 0 })); } catch (e) {}
+
+      const messageContent = completion?.choices?.[0]?.message?.content;
+      if (!messageContent || String(messageContent).trim().length === 0) {
+        console.warn('[generateReply] OpenAI returned empty content — returning fallback message');
+        return 'Sajnálom, nem sikerült érdemi választ generálni a megadott adatok alapján.';
+      }
+      return messageContent;
+    } catch (err) {
+      console.error('[generateReply] OpenAI completion error:', err);
+      // Re-throw so caller can decide, but provide a human-friendly fallback to avoid silence
+      throw err;
+    }
   } catch (error) {
     console.error('Hiba a válasz generálásakor:', error);
     throw error;

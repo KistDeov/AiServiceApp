@@ -214,8 +214,8 @@ const HomeView = ({ showSnackbar, reloadKey }) => {
       {halfAuto && (
         <Typography variant="body1" sx={{ mt: 2 }}>
           {unreadEmails.length > 0 
-            ? `${unreadEmails.length} db előkészített leveled van.`
-            : 'Nincs előkészített leveled'}
+            ? `${unreadEmails.length} db előkészítésre váró leveled van.`
+            : 'Nincs előkészítésre váró leveled'}
           <IconButton onClick={() => handleViewChange('generatedMails')} size="large" sx={{ ml: 1, color: 'primary.main' }}>
               <FaArrowCircleRight />
           </IconButton>
