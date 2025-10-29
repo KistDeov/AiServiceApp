@@ -1,4 +1,5 @@
 Fontos:
+    - HA lefrissül az uj verzióra ne resetelje a sent emails.jsont meg a többit!
     - Windows ne dobja fel hogy futtatás mellőzése mert vírusnak hiszi
 Ráér:  
     - Lehessen több emailel bejelentkezni, úgymint a thunderbirdnél (Fiókok aloldal)
