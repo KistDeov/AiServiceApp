@@ -236,7 +236,7 @@ const MailsView = ({ showSnackbar }) => {
               variant="outlined"
               maxWidth="80%"
               multiline
-              rows={6}
+              rows={15}
               sx={{ mt: 2 }}
               value={replyBody}
               onChange={(e) => setReplyBody(e.target.value)}

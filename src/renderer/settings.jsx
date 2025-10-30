@@ -486,7 +486,7 @@ const SettingsView = ({ themeName, setThemeName, onAutoSendChanged, onHalfAutoSe
                       <Divider sx={{ mb: 2 }} />
                     </Box>
                     <Box>
-                      <Typography variant="subtitle1">Eddig a dátumig keressen a levelekben az AI a válaszadáshoz</Typography>
+                      <Typography variant="subtitle1">Az AI a lent megadott dátumig visszamenőleg bejövő levelekben keressen a válaszadáshoz</Typography>
                       <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mt: 1 }}>
                         <TextField label="Dátum" type="date" value={fromDate} onChange={handlefromDateChange} InputLabelProps={{ shrink: true }} sx={{ width: 220 }} />
                       </Box>

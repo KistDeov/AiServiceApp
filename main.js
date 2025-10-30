@@ -1597,8 +1597,188 @@ async function generateReply(email) {
           try {
             const kbMatches = await KB.queryByEmbedding(emailEmb, 200);
             if (Array.isArray(kbMatches) && kbMatches.length) {
-              const snippets = kbMatches.map(s => `(${s.score.toFixed(3)}) From: ${s.from} | Subject: ${s.subject}\n${safeTrim(s.text || '', 800)}`);
+              // Include full matching chunks (with metadata) so the reply can use
+              // all relevant chunk text. We include docId and chunkIndex to make
+              // reconstruction unambiguous. Note: this may increase prompt size;
+              // we cap the embeddingsContext later but increased the cap to
+              // reduce accidental truncation.
+              const snippets = kbMatches.map(s => {
+                const header = `(${s.score.toFixed(3)}) From: ${s.from} | Subject: ${s.subject} | doc:${s.docId} #chunk:${s.chunkIndex}`;
+                const body = String(s.text || '').trim();
+                return `${header}\n${body}`;
+              });
               embeddingsContext += 'Releváns korábbi emailek a postaládából:\n' + snippets.join('\n\n') + '\n\n';
+              // If we found relevant chunks, also include other chunks from the same
+              // original documents so the model can see contiguous context. We load
+              // full KB and append additional chunks for each matched docId. Stop
+              // appending if we exceed the embeddingsContext cap to avoid blowing
+              // the model context.
+              try {
+                const included = new Set(kbMatches.map(k => k.id || `${k.docId}-${k.chunkIndex}`));
+                const allEntries = KB.getAllEntries();
+                const docIds = [...new Set(kbMatches.map(k => k.docId))];
+                let totalAddedChunks = 0;
+                console.log('[generateReply] KB matches summary:', { matches: kbMatches.length, uniqueDocs: docIds.length });
+                for (const docId of docIds) {
+                  const beforeIncluded = included.size;
+                  // Collect any KB-stored chunks for this docId
+                  let docChunks = allEntries.filter(e => e.docId === docId).sort((a, b) => (a.chunkIndex || 0) - (b.chunkIndex || 0));
+                  console.log('[generateReply] docChunks initial for', docId, 'count=', docChunks.length);
+                  // If KB doesn't have all chunks, try to reconstruct from the fetched mailbox emails
+                  // so we can include contiguous context. mailboxEmails is available in this scope.
+                  const match = kbMatches.find(k => k.docId === docId);
+                  const expectedTotal = match && match.totalChunks ? match.totalChunks : (docChunks.length || null);
+                  // Reconstruct chunks from mailboxEmails if mailboxEmails is available.
+                  // Aggressive mode: always attempt reconstruction from mailbox when available
+                  // to avoid missing context due to earlier truncation.
+                  if (Array.isArray(mailboxEmails) && mailboxEmails.length) {
+                    try {
+                      let orig = mailboxEmails.find(m => String(m.id) === String(docId) || String(m.messageId || '') === String(docId));
+                      // Fallback: if we couldn't find by id, try fuzzy match by subject/from
+                      if (!orig) {
+                        try {
+                          const sampleMatch = match || {};
+                          const wantedSub = String(sampleMatch.subject || '').trim().toLowerCase();
+                          const wantedFrom = String(sampleMatch.from || '').trim().toLowerCase();
+                          orig = mailboxEmails.find(m => {
+                            try {
+                              const ms = String(m.subject || '').trim().toLowerCase();
+                              const mf = String(m.from || '').trim().toLowerCase();
+                              if (wantedSub && ms && ms.includes(wantedSub)) return true;
+                              if (wantedFrom && mf && mf.includes(wantedFrom)) return true;
+                              return false;
+                            } catch (e) { return false; }
+                          });
+                        } catch (fm) {
+                          orig = null;
+                        }
+                      }
+
+                          if (orig && orig.body) {
+                            console.log('[generateReply] reconstruct orig found for docId', docId, 'subject=', orig.subject, 'from=', orig.from, 'bodyLen=', String(orig.body || '').length);
+                        // dynamic import of chunker to reconstruct chunks consistently
+                        const helperPath = path.join(process.cwd(), 'src', 'backend', 'embeddings-helper.js');
+                        const { pathToFileURL } = await import('url');
+                        const helperUrl = pathToFileURL(helperPath).href;
+                        const helper = await import(helperUrl);
+                        const chunkTextFn = helper.chunkText || helper.default?.chunkText || helper.chunkText;
+                        if (typeof chunkTextFn === 'function') {
+                          // Reconstruct using a chunk size aligned with KB/embeddings
+                          // defaults (32k chars ~ 8000 tokens) to ensure contiguous
+                          // context matches what was embedded earlier.
+                          const reconstructed = chunkTextFn(String(orig.body || ''), 32000, Math.floor(32000 * 0.08)) || [];
+                          // Merge reconstructed chunks with existing KB chunks, preferring KB when available
+                          const reconChunks = reconstructed.map((c, idx) => ({ id: `${docId}-${idx}`, docId, chunkIndex: idx, text: c.text || c, chunkStart: c.start || null, chunkEnd: c.end || null, totalChunks: reconstructed.length, from: orig.from || '', subject: orig.subject || '' }));
+                          // Only add reconChunks that are not already present in docChunks
+                          const existingIdx = new Set(docChunks.map(dc => Number(dc.chunkIndex)));
+                          for (const rc of reconChunks) {
+                            if (!existingIdx.has(Number(rc.chunkIndex))) docChunks.push(rc);
+                          }
+                          // re-sort after merge
+                          docChunks.sort((a, b) => (a.chunkIndex || 0) - (b.chunkIndex || 0));
+                          console.log('[generateReply] after merge docChunks count=', docChunks.length, 'reconChunks count=', reconChunks.length);
+                            // If reconstruction produced more chunks than KB has, prefer the
+                            // reconstructed version (aggressive mode) and dump it to logs for
+                            // diagnosis.
+                            try {
+                              if (reconChunks.length > (docChunks.length || 0)) {
+                                docChunks = reconChunks.slice();
+                                const dumpDir = path.join(process.cwd(), 'logs');
+                                if (!fs.existsSync(dumpDir)) fs.mkdirSync(dumpDir, { recursive: true });
+                                const dumpPath = path.join(dumpDir, `reconstructed-${docId}.txt`);
+                                const dumpContent = reconChunks.map(r => `--- chunk ${r.chunkIndex}\n${r.text || ''}\n`).join('\n');
+                                fs.writeFileSync(dumpPath, dumpContent, 'utf8');
+                                console.log('[generateReply] wrote reconstructed chunks to', dumpPath);
+                              }
+                            } catch (de) {
+                              console.error('[generateReply] failed to dump reconstructed chunks:', de);
+                            }
+                        }
+                      }
+                    } catch (re) {
+                      console.error('[generateReply] failed to reconstruct doc chunks from mailboxEmails:', re);
+                    }
+                  }
+
+                  // Instead of appending all doc chunks (which can cause early truncation at the same spot),
+                  // include a contiguous window around matched chunk indices. This guarantees the model sees
+                  // the surrounding context for the matched portions and reduces repeated truncation at the
+                  // same absolute position.
+                  const matchesForDoc = kbMatches.filter(k => k.docId === docId).map(k => Number(k.chunkIndex)).filter(n => !isNaN(n));
+                  if (matchesForDoc.length === 0) {
+                    // nothing matched for this docId (shouldn't happen), skip
+                  } else {
+                    const minMatch = Math.max(0, Math.min(...matchesForDoc));
+                    const maxMatch = Math.max(...matchesForDoc);
+                    // Window size: include more neighboring chunks on either side (adjustable)
+                    // Increased per request to give the model more contiguous context.
+                    // Raised to 25 to include a larger context window around matches.
+                    const window = 25;
+                    const startIdx = Math.max(0, minMatch - window);
+                    const endIdx = Math.min((docChunks.length ? docChunks[docChunks.length - 1].chunkIndex : maxMatch) || maxMatch, maxMatch + window);
+
+                    // Filter and include only the contiguous window of chunks
+                    const chunksToInclude = docChunks.filter(c => c && typeof c.chunkIndex === 'number' && c.chunkIndex >= startIdx && c.chunkIndex <= endIdx).sort((a, b) => a.chunkIndex - b.chunkIndex);
+                    for (const c of chunksToInclude) {
+                      if (!c || !c.id || included.has(c.id)) continue;
+                      const header = `From: ${c.from} | Subject: ${c.subject} | doc:${c.docId} chunk:${c.chunkIndex}/${c.totalChunks || '?'} ${c.chunkStart !== null && c.chunkEnd !== null ? `(chars ${c.chunkStart}-${c.chunkEnd})` : ''}`;
+                      const body = String(c.text || '').trim();
+                      embeddingsContext += header + '\n' + body + '\n\n';
+                      included.add(c.id);
+                      totalAddedChunks++;
+                      if (embeddingsContext.length > 200000) {
+                        embeddingsContext += '\n\n[...további bejegyzések levágva...]';
+                        break;
+                      }
+                    }
+
+                    // If present, also include Table-of-Contents chunks (common heading: "Tartalomjegyzék")
+                    try {
+                      const tocRegex = /tartalomjegyzék|tartalomjegyzek/i;
+                      const tocChunks = docChunks.filter(dc => dc && tocRegex.test(String(dc.text || '')));
+                      for (const tc of tocChunks) {
+                        if (embeddingsContext.length > 200000) break;
+                        if (!tc || !tc.id || included.has(tc.id)) continue;
+                        embeddingsContext += `From: ${tc.from} | Subject: ${tc.subject} | doc:${tc.docId} chunk:${tc.chunkIndex}/${tc.totalChunks || '?'} (TOC)\n${String(tc.text || '').trim()}\n\n`;
+                        included.add(tc.id);
+                        totalAddedChunks++;
+                      }
+                    } catch (tcerr) {
+                      console.error('[generateReply] TOC include error:', tcerr);
+                    }
+
+                    // Include chunks that include truncation markers like "(a forrás" or "levágva" and try to include their neighbors
+                    try {
+                      const truncRegex = /\(a forr[aá]s|levágva|levagva/i;
+                      const truncChunks = docChunks.filter(dc => dc && truncRegex.test(String(dc.text || '')));
+                      for (const t of truncChunks) {
+                        if (embeddingsContext.length > 200000) break;
+                        const idx = Number(t.chunkIndex);
+                        const neighborIdxs = [idx - 1, idx, idx + 1];
+                        for (const ni of neighborIdxs) {
+                          const nc = docChunks.find(d => Number(d.chunkIndex) === ni);
+                          if (!nc || !nc.id || included.has(nc.id)) continue;
+                          if (embeddingsContext.length > 200000) break;
+                          embeddingsContext += `From: ${nc.from} | Subject: ${nc.subject} | doc:${nc.docId} chunk:${nc.chunkIndex}/${nc.totalChunks || '?'} (context around truncation)\n${String(nc.text || '').trim()}\n\n`;
+                          included.add(nc.id);
+                          totalAddedChunks++;
+                        }
+                      }
+                    } catch (trerr) {
+                      console.error('[generateReply] truncation-include error:', trerr);
+                    }
+                  }
+                  const afterIncluded = included.size;
+                  const addedForDoc = afterIncluded - beforeIncluded;
+                  // Log how many chunks we added for this document and some source metadata
+                  const sample = kbMatches.find(k => k.docId === docId) || {};
+                  console.log('[generateReply] KB included chunks for doc:', { docId, addedForDoc, kbStoredChunks: docChunks.length, totalChunks: sample.totalChunks || docChunks.length || '?', from: sample.from || (docChunks[0] && docChunks[0].from) || 'unknown', subject: sample.subject || (docChunks[0] && docChunks[0].subject) || 'unknown' });
+                  if (embeddingsContext.length > 100000) break;
+                }
+                console.log('[generateReply] KB total chunks appended to embeddingsContext:', totalAddedChunks);
+              } catch (e) {
+                console.error('[generateReply] failed to append additional doc chunks:', e);
+              }
             }
           } catch (e) {
             console.error('[generateReply] KB.queryByEmbedding failed:', e);
@@ -1610,8 +1790,12 @@ async function generateReply(email) {
 
       // truncate the final embeddingsContext so we don't blow model context
       // Allow a larger embeddingsContext to reduce missing context; still cap to avoid hitting extreme limits
-      if (embeddingsContext && embeddingsContext.length > 20000) {
-        embeddingsContext = embeddingsContext.slice(0, 20000) + '\n\n[...további bejegyzések levágva...]';
+      // Increase cap to reduce accidental truncation while still protecting
+      // model context. If you need absolute no-loss guarantees for very large
+      // mailboxes, consider retrieving originals on-demand instead of
+      // embedding everything into the prompt.
+      if (embeddingsContext && embeddingsContext.length > 200000) {
+        embeddingsContext = embeddingsContext.slice(0, 200000) + '\n\n[...további bejegyzések levágva...]';
       }
     } catch (e) {
       console.error('[generateReply] failed to build embeddings context', e);

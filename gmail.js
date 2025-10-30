@@ -4,8 +4,15 @@ import { htmlToText } from 'html-to-text';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { getSecret } from './src/utils/keytarHelper.js';
+import { app } from 'electron';
+import { OpenAI } from 'openai';
+import pdfParse from 'pdf-parse';
+import XLSX from 'xlsx';
+import mammoth from 'mammoth';
+import { simpleParser } from 'mailparser';
 import fs from 'fs';
 import path from 'path';
+import { createAndStoreEmbeddingsForLongText } from './src/backend/embeddings-helper.js';
 
 function decodeRFC2047(subject) {
   return subject.replace(/=\?([^?]+)\?([BbQq])\?([^?]+)\?=/g, (match, charset, encoding, text) => {
@@ -223,6 +230,165 @@ export async function getRecentEmails() {
 
       const body = extractBodyFromPayload(full.data.payload);
 
+      // Helper: process saved attachment -> extract text, create embedding, then remove file
+  async function processAndEmbedAttachment(filePath, filename, mimeType, sourceId = null) {
+        try {
+          // Extract text depending on extension/mime
+          const lower = (filename || '').toLowerCase();
+          let text = '';
+          if (lower.endsWith('.pdf')) {
+            try {
+              const data = fs.readFileSync(filePath);
+              const parsed = await pdfParse(data);
+              text = parsed && parsed.text ? String(parsed.text) : '';
+            } catch (e) {
+              console.error('[AIServiceApp][gmail.js] pdf parse error:', e && e.message ? e.message : e);
+            }
+          } else if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
+            try {
+              const wb = XLSX.readFile(filePath, { cellDates: true });
+              const sheets = wb.SheetNames || [];
+              const parts = [];
+              for (const s of sheets) {
+                try {
+                  const sheet = wb.Sheets[s];
+                  const csv = XLSX.utils.sheet_to_csv(sheet, { FS: '\t' });
+                  parts.push(`Sheet: ${s}\n` + csv);
+                } catch (se) { /* ignore sheet errors */ }
+              }
+              text = parts.join('\n\n');
+            } catch (e) {
+              console.error('[AIServiceApp][gmail.js] excel parse error:', e && e.message ? e.message : e);
+            }
+          } else if (lower.endsWith('.docx')) {
+            try {
+              const buffer = fs.readFileSync(filePath);
+              const res = await mammoth.extractRawText({ buffer });
+              text = res && res.value ? String(res.value) : '';
+            } catch (e) {
+              console.error('[AIServiceApp][gmail.js] docx parse error:', e && e.message ? e.message : e);
+            }
+          } else if (lower.endsWith('.eml') || mimeType === 'message/rfc822') {
+            try {
+              const raw = fs.readFileSync(filePath);
+              const parsed = await simpleParser(raw);
+              text = parsed && parsed.text ? String(parsed.text) : '';
+            } catch (e) {
+              console.error('[AIServiceApp][gmail.js] eml parse error:', e && e.message ? e.message : e);
+            }
+          }
+
+          if (!text || String(text).trim().length === 0) {
+            // nothing to embed
+            try { fs.unlinkSync(filePath); } catch (e) { /* ignore */ }
+            return null;
+          }
+
+          // Create embeddings using the chunked embeddings helper (handles very long texts)
+          try {
+            const helperPath = path.join(process.cwd(), 'src', 'backend', 'embeddings-helper.js');
+            const { pathToFileURL } = await import('url');
+            const helperUrl = pathToFileURL(helperPath).href;
+            const { createAndStoreEmbeddingsForLongText } = await import(helperUrl);
+            const stored = await createAndStoreEmbeddingsForLongText(text, { filename, sourceId: sourceId || null, maxTokens: 2000 });
+            if (!stored) {
+              console.warn('[AIServiceApp][gmail.js] no embeddings were stored for attachment', filename);
+            }
+          } catch (e) {
+            console.error('[AIServiceApp][gmail.js] embedding creation failed (chunked helper):', e && e.message ? e.message : e);
+          }
+
+          // Remove local file after processing
+          try { fs.unlinkSync(filePath); } catch (e) { /* ignore deletion errors */ }
+          return true;
+        } catch (err) {
+          console.error('[AIServiceApp][gmail.js] processAndEmbedAttachment error:', err && err.message ? err.message : err);
+          try { fs.unlinkSync(filePath); } catch (e) { /* ignore */ }
+          return null;
+        }
+      }
+
+      // Extract attachments (pdf, xlsx, xls) from payload. Save to attachments/ and include metadata.
+      async function extractAttachments(payload, gmail, messageId) {
+        const atts = [];
+        async function walk(part) {
+          if (!part) return;
+          // If part has a filename it may be an attachment
+          const filename = part.filename || '';
+          const hasAttachmentId = part.body && part.body.attachmentId;
+          const hasData = part.body && part.body.data;
+          // Handle named attachments (pdf, xlsx, xls, doc, docx, eml) as well as
+          // inline attached messages (mimeType 'message/rfc822'). Some providers
+          // set a filename, others don't — so we check mimeType as well.
+          const lower = (filename || '').toLowerCase();
+          const mt = (part.mimeType || '').toLowerCase();
+          const looksLikeAttachment = filename && (hasAttachmentId || hasData) || mt === 'message/rfc822';
+          if (looksLikeAttachment) {
+            if (lower.endsWith('.pdf') || lower.endsWith('.xlsx') || lower.endsWith('.xls') || lower.endsWith('.docx') || lower.endsWith('.doc') || lower.endsWith('.eml') || mt === 'message/rfc822') {
+              try {
+                let b64 = null;
+                if (hasData && part.body.data) {
+                  b64 = part.body.data;
+                } else if (hasAttachmentId) {
+                  const attRes = await gmail.users.messages.attachments.get({
+                    userId: 'me',
+                    messageId: messageId,
+                    id: part.body.attachmentId,
+                  });
+                  b64 = attRes.data && attRes.data.data ? attRes.data.data : null;
+                }
+                // For message/rfc822 the raw message may be in part.body.data even without filename
+                if (b64 || mt === 'message/rfc822') {
+                  // If no explicit base64 content (message/rfc822), try to read raw subpart data
+                  if (!b64 && part.body && part.body.data) b64 = part.body.data;
+                  // Convert to classic base64 (pad) then save file
+                  if (!b64) {
+                    // nothing to save
+                    // This is inside the async `walk` function — use `return` to exit
+                    // the current invocation instead of `continue` which targets loops
+                    // and would generate a "jump target cannot cross function boundary" error.
+                    return;
+                  }
+                  let s = b64.replace(/-/g, '+').replace(/_/g, '/');
+                  while (s.length % 4 !== 0) s += '=';
+                  const buffer = Buffer.from(s, 'base64');
+                  const attsDir = path.resolve(process.cwd(), 'fromAttachments');
+                  if (!fs.existsSync(attsDir)) fs.mkdirSync(attsDir, { recursive: true });
+                  // Ensure unique filename
+                  const baseName = filename && filename.length ? filename : (mt === 'message/rfc822' ? 'attached-email.eml' : `attachment`);
+                  const safeName = `${messageId}-${Date.now()}-${baseName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+                  const filePath = path.join(attsDir, safeName);
+                  fs.writeFileSync(filePath, buffer);
+                  atts.push({ filename: filename || safeName, mimeType: part.mimeType || 'application/octet-stream', path: filePath, base64: s });
+                  // Process and embed now, then delete file (processAndEmbedAttachment will delete)
+                  try {
+                    await processAndEmbedAttachment(filePath, filename || safeName, part.mimeType || 'application/octet-stream', messageId);
+                  } catch (pe) {
+                    console.error('[AIServiceApp][gmail.js] processAndEmbedAttachment failed:', pe && pe.message ? pe.message : pe);
+                    // ensure deletion if it wasn't removed
+                    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (e) { /* ignore */ }
+                  }
+                }
+              } catch (e) {
+                console.error('[AIServiceApp][gmail.js] attachment extract error:', e && e.message ? e.message : e);
+              }
+            }
+          }
+          if (part.parts && Array.isArray(part.parts)) {
+            for (const p of part.parts) await walk(p);
+          }
+        }
+        await walk(payload);
+        return atts;
+      }
+
+      let attachments = [];
+      try {
+        attachments = await extractAttachments(full.data.payload, gmail, msg.id);
+      } catch (e) {
+        console.error('[AIServiceApp][gmail.js] extractAttachments failed:', e && e.message ? e.message : e);
+      }
+
       return {
         id: msg.id,
         from: headers['From'],
@@ -231,6 +397,7 @@ export async function getRecentEmails() {
         body,
         // Use the extracted full body as snippet so the client receives the complete content (no truncation)
         snippet: body,
+        attachments // array of { filename, mimeType, path, base64 }
       };
     })
   );

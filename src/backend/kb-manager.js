@@ -3,18 +3,16 @@ import path from 'path';
 import { app } from 'electron';
 import { OpenAI } from 'openai';
 import { getSecret } from '../utils/keytarHelper.js';
+import { chunkText as losslessChunkText } from './embeddings-helper.js';
 
 // Simple file-based embeddings KB. Stores array of entries:
 // { id: `${msgId}-${chunkIndex}`, docId: msgId, chunkIndex, text, subject, from, date, embedding }
 
 const KB_FILENAME = path.join(app.getPath('userData'), 'embeddings_kb.json');
-// Increased chunk size to avoid splitting emails into many small chunks which
-// could cause loss of context when parts are embedded separately. Set to a
-// high value (120k chars) to effectively disable aggressive chunking for
-// typical email sizes while still keeping a sane upper bound to avoid
-// unbounded memory usage. Adjust if you hit OpenAI input size limits or cost
-// concerns.
-const DEFAULT_CHUNK_CHARS = 120000;
+// Use a chunk size that aims to maximize per-chunk context while staying
+// comfortably within typical embedding token limits. This value is in
+// characters (conservative char->token heuristic: ~4 chars/token).
+const DEFAULT_CHUNK_CHARS = 16000;
 const BATCH_EMBED_SIZE = 100;
 const LOG_FILENAME = path.join(app.getPath('userData'), 'kb_manager.log');
 
@@ -54,16 +52,8 @@ function saveKB(kb) {
   }
 }
 
-function chunkText(text, maxChars = DEFAULT_CHUNK_CHARS) {
-  if (!text) return [];
-  const parts = [];
-  let i = 0;
-  while (i < text.length) {
-    parts.push(text.slice(i, i + maxChars));
-    i += maxChars;
-  }
-  return parts;
-}
+// Use centralized lossless chunker from embeddings-helper to avoid data loss.
+// `losslessChunkText` returns array of { text, start, end } objects.
 
 function cosine(a, b) {
   if (!a || !b || a.length !== b.length) return 0;
@@ -117,11 +107,16 @@ async function addEmails(emails = []) {
     const from = em.from || '';
     const date = em.date || '';
     const body = em.body || em.text || '';
-    const chunks = chunkText(body, DEFAULT_CHUNK_CHARS);
-    for (let ci = 0; ci < chunks.length; ci++) {
+    const chunkObjs = losslessChunkText(body, DEFAULT_CHUNK_CHARS, Math.floor(DEFAULT_CHUNK_CHARS * 0.1));
+    const totalChunks = chunkObjs.length;
+    for (let ci = 0; ci < chunkObjs.length; ci++) {
+      const cobj = chunkObjs[ci];
+      const chunkText = (typeof cobj === 'string') ? cobj : (cobj.text || '');
+      const chunkStart = (cobj && typeof cobj.start === 'number') ? cobj.start : null;
+      const chunkEnd = (cobj && typeof cobj.end === 'number') ? cobj.end : null;
       const id = `${msgId}-${ci}`;
       if (existingIds.has(id)) continue;
-      toEmbed.push({ id, docId: msgId, chunkIndex: ci, text: chunks[ci], subject, from, date });
+      toEmbed.push({ id, docId: msgId, chunkIndex: ci, text: chunkText, subject, from, date, chunkStart, chunkEnd, totalChunks });
     }
   }
 
@@ -165,7 +160,7 @@ async function addEmails(emails = []) {
         const data = (resp && resp.data) ? resp.data.map(d => d.embedding) : [];
         for (let j = 0; j < data.length; j++) {
           const entry = slice[j];
-          kb.push({ id: entry.id, docId: entry.docId, chunkIndex: entry.chunkIndex, text: entry.text, subject: entry.subject, from: entry.from, date: entry.date, embedding: data[j] });
+          kb.push({ id: entry.id, docId: entry.docId, chunkIndex: entry.chunkIndex, text: entry.text, subject: entry.subject, from: entry.from, date: entry.date, embedding: data[j], chunkStart: entry.chunkStart || null, chunkEnd: entry.chunkEnd || null, totalChunks: entry.totalChunks || null });
         }
         appendLog(`Embedded batch ${i}/${toEmbed.length} -> ${data.length} items`);
         await sleep(200);
@@ -186,7 +181,7 @@ async function addEmails(emails = []) {
               const singleResp = await openai.embeddings.create({ model: 'text-embedding-3-small', input: String(entry.text) });
               const emb = singleResp && singleResp.data && singleResp.data[0] ? singleResp.data[0].embedding : null;
               if (emb) {
-                kb.push({ id: entry.id, docId: entry.docId, chunkIndex: entry.chunkIndex, text: entry.text, subject: entry.subject, from: entry.from, date: entry.date, embedding: emb });
+                kb.push({ id: entry.id, docId: entry.docId, chunkIndex: entry.chunkIndex, text: entry.text, subject: entry.subject, from: entry.from, date: entry.date, embedding: emb, chunkStart: entry.chunkStart || null, chunkEnd: entry.chunkEnd || null, totalChunks: entry.totalChunks || null });
                 appendLog(`Embedded single entry ${entry.id}`);
                 await sleep(100);
                 continue;
@@ -199,16 +194,16 @@ async function addEmails(emails = []) {
             // compute embeddings for each subchunk, then average the vectors.
             try {
               const SUB_CHUNK = 2000; // safe sub-chunk size
-              const parts = chunkText(String(entry.text), SUB_CHUNK);
+              const partObjs = losslessChunkText(String(entry.text), SUB_CHUNK, Math.floor(SUB_CHUNK * 0.1));
               const subEmbeddings = [];
-              for (let p = 0; p < parts.length; p += BATCH_EMBED_SIZE) {
-                const subSlice = parts.slice(p, p + BATCH_EMBED_SIZE);
+              for (let p = 0; p < partObjs.length; p += BATCH_EMBED_SIZE) {
+                const subSlice = partObjs.slice(p, p + BATCH_EMBED_SIZE).map(x => x.text || '');
                 const subResp = await openai.embeddings.create({ model: 'text-embedding-3-small', input: subSlice });
                 const subData = (subResp && subResp.data) ? subResp.data.map(d => d.embedding) : [];
                 for (const sd of subData) subEmbeddings.push(sd);
                 await sleep(100);
               }
-              if (subEmbeddings.length) {
+                if (subEmbeddings.length) {
                 // average vectors
                 const len = subEmbeddings.length;
                 const out = new Array(subEmbeddings[0].length).fill(0);
@@ -216,8 +211,8 @@ async function addEmails(emails = []) {
                   for (let k = 0; k < vec.length; k++) out[k] += vec[k] || 0;
                 }
                 for (let k = 0; k < out.length; k++) out[k] = out[k] / len;
-                kb.push({ id: entry.id, docId: entry.docId, chunkIndex: entry.chunkIndex, text: entry.text, subject: entry.subject, from: entry.from, date: entry.date, embedding: out });
-                appendLog(`Embedded entry ${entry.id} via subchunks (${parts.length} parts)`);
+                kb.push({ id: entry.id, docId: entry.docId, chunkIndex: entry.chunkIndex, text: entry.text, subject: entry.subject, from: entry.from, date: entry.date, embedding: out, chunkStart: entry.chunkStart || null, chunkEnd: entry.chunkEnd || null, totalChunks: entry.totalChunks || null });
+                appendLog(`Embedded entry ${entry.id} via subchunks`);
               } else {
                 appendLog(`No sub-embeddings produced for ${entry.id}`);
               }
@@ -242,7 +237,7 @@ function queryByEmbedding(queryEmb, topN = 50) {
   if (!kb.length) return [];
   const scored = kb.map(item => ({ score: cosine(queryEmb, item.embedding || []), item }));
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, topN).map(s => ({ score: s.score, text: s.item.text, docId: s.item.docId, subject: s.item.subject, from: s.item.from, date: s.item.date, chunkIndex: s.item.chunkIndex }));
+  return scored.slice(0, topN).map(s => ({ score: s.score, id: s.item.id, text: s.item.text, docId: s.item.docId, subject: s.item.subject, from: s.item.from, date: s.item.date, chunkIndex: s.item.chunkIndex, chunkStart: s.item.chunkStart || null, chunkEnd: s.item.chunkEnd || null, totalChunks: s.item.totalChunks || null }));
 }
 
 function getAllEntries() {

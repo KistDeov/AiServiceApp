@@ -1,6 +1,6 @@
 {
   "name": "aimail",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "An aplication that uses AI to answer mails",
   "main": "main.js",
   "type": "module",
@@ -46,6 +46,7 @@
       "dist/**/*",
       "assets/**/*",
       "attachments/**/*",
+      "fromAttachments/**/*",
       "main.js",
       "preload.js",
       "gmail.js",
@@ -132,7 +133,9 @@
     "rfc2047": "^4.0.1",
     "style-loader": "^4.0.0",
     "update-electron-app": "^3.1.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "pdf-parse": "^1.1.1",
+    "mammoth": "^1.4.19"
   },
   "config": {
     "forge": {

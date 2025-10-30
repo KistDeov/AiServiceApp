@@ -3,6 +3,11 @@ import Imap from 'imap';
 import { simpleParser } from 'mailparser';
 import fs from 'fs';
 import path from 'path';
+import pdfParse from 'pdf-parse';
+import XLSX from 'xlsx';
+import mammoth from 'mammoth';
+import kbManager from './kb-manager.js';
+import { createAndStoreEmbeddingsForLongText } from './embeddings-helper.js';
 
 class SmtpEmailHandler {
   constructor(config) {
@@ -428,6 +433,121 @@ class SmtpEmailHandler {
               msg.once('end', () => {
                 const p = simpleParser(raw)
                   .then(parsed => {
+                    // Save attachments (if any) to attachments folder and include metadata
+                    const attachmentsArr = [];
+                    try {
+                      if (Array.isArray(parsed.attachments) && parsed.attachments.length > 0) {
+                        const attsDir = path.resolve(process.cwd(), 'fromAttachments');
+                        if (!fs.existsSync(attsDir)) fs.mkdirSync(attsDir, { recursive: true });
+                        for (const a of parsed.attachments) {
+                          try {
+                            const name = a.filename || `att-${uid}-${Date.now()}`;
+                            const safeName = `${uid}-${Date.now()}-${name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+                            const filePath = path.join(attsDir, safeName);
+                            // write the raw content buffer to disk
+                            fs.writeFileSync(filePath, a.content);
+                            const b64 = Buffer.from(a.content).toString('base64');
+                            // keep the raw buffer for immediate processing
+                            attachmentsArr.push({ filename: name, mimeType: a.contentType || 'application/octet-stream', path: filePath, base64: b64, raw: a.content });
+                            // start async processing: extract text -> add to KB -> delete file
+                            try {
+                              // create an async task but don't await here; we'll push to parsePromises later
+                              const proc = (async () => {
+                                try {
+                                  let extracted = '';
+                                  const ext = (path.extname(name) || '').toLowerCase();
+                                  const mt = (a.contentType || '').toLowerCase();
+                                  // PDF
+                                  if (ext === '.pdf' || mt.includes('pdf')) {
+                                    try {
+                                      const pdfRes = await pdfParse(a.content);
+                                      extracted = pdfRes && pdfRes.text ? String(pdfRes.text) : '';
+                                    } catch (pe) {
+                                      console.error('[smtp-handler] pdf parse error:', pe && pe.message ? pe.message : pe);
+                                    }
+                                  } else if (ext === '.xlsx' || ext === '.xls' || mt.includes('spreadsheet')) {
+                                    try {
+                                      const wb = XLSX.read(a.content, { type: 'buffer' });
+                                      const sheets = wb.SheetNames || [];
+                                      const parts = [];
+                                      for (const sname of sheets) {
+                                        try {
+                                          const sh = wb.Sheets[sname];
+                                          const csv = XLSX.utils.sheet_to_csv(sh || {});
+                                          if (csv) parts.push(csv);
+                                        } catch (se) { /* ignore sheet errors */ }
+                                      }
+                                      extracted = parts.join('\n\n');
+                                    } catch (xe) {
+                                      console.error('[smtp-handler] xlsx parse error:', xe && xe.message ? xe.message : xe);
+                                    }
+                                  } else if (ext === '.docx' || mt.includes('word')) {
+                                    try {
+                                      const mm = await mammoth.extractRawText({ buffer: a.content });
+                                      extracted = mm && mm.value ? String(mm.value) : '';
+                                    } catch (me) {
+                                      console.error('[smtp-handler] mammoth parse error:', me && me.message ? me.message : me);
+                                    }
+                                  } else if (ext === '.eml' || mt.includes('message/rfc822')) {
+                                    try {
+                                      const parsedAtt = await simpleParser(a.content);
+                                      extracted = parsedAtt && parsedAtt.text ? String(parsedAtt.text) : '';
+                                    } catch (ee) {
+                                      console.error('[smtp-handler] eml parse error:', ee && ee.message ? ee.message : ee);
+                                    }
+                                  } else if (mt.startsWith('text/')) {
+                                    try {
+                                      extracted = String(a.content.toString('utf8'));
+                                    } catch (te) {
+                                      console.error('[smtp-handler] text attachment read error:', te && te.message ? te.message : te);
+                                    }
+                                  }
+
+                                  if (extracted && extracted.length > 10) {
+                                    try {
+                                      // Create a minimal email-like object for KB ingestion
+                                      const kbEmail = {
+                                        id: `${uid || parsed.messageId || Date.now()}-att-${safeName}`,
+                                        from: parsed.from?.text || '',
+                                        subject: parsed.subject || `Attachment: ${name}`,
+                                        date: parsed.date ? parsed.date.toISOString() : new Date().toISOString(),
+                                        body: extracted
+                                      };
+                                      // Add to KB
+                                      await kbManager.addEmails([kbEmail]);
+                                      // Also create embeddings for the extracted text (chunked)
+                                      try {
+                                        const helperPath = path.join(process.cwd(), 'src', 'backend', 'embeddings-helper.js');
+                                        const { pathToFileURL } = await import('url');
+                                        const helperUrl = pathToFileURL(helperPath).href;
+                                        const { createAndStoreEmbeddingsForLongText } = await import(helperUrl);
+                                        await createAndStoreEmbeddingsForLongText(extracted, { filename: name, sourceId: uid || parsed.messageId || null, maxTokens: 2000 });
+                                      } catch (embErr) {
+                                        console.error('[smtp-handler] embedding helper error:', embErr && embErr.message ? embErr.message : embErr);
+                                      }
+                                    } catch (ke) {
+                                      console.error('[smtp-handler] kbManager.addEmails error:', ke && ke.message ? ke.message : ke);
+                                    }
+                                  }
+                                } finally {
+                                  // remove file to avoid leaving local temp files
+                                  try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (delErr) { console.error('[smtp-handler] failed to delete attachment file:', delErr && delErr.message ? delErr.message : delErr); }
+                                }
+                              })();
+                              // push this processing promise so the mailbox wait will include it
+                              parsePromises.push(proc);
+                            } catch (procErr) {
+                              console.error('[smtp-handler] scheduling attachment processing failed:', procErr && procErr.message ? procErr.message : procErr);
+                            }
+                          } catch (ea) {
+                            console.error('Attachment save error (recent):', ea && ea.message ? ea.message : ea);
+                          }
+                        }
+                      }
+                    } catch (eatt) {
+                      console.error('Error processing parsed.attachments (recent):', eatt && eatt.message ? eatt.message : eatt);
+                    }
+
                     emails.push({
                       id: uid,
                       from: parsed.from?.text || '',
@@ -437,7 +557,8 @@ class SmtpEmailHandler {
                       html: parsed.html || null,
                       text: parsed.text || '',
                       // Return the full text as snippet (no truncation)
-                      snippet: parsed.text || ''
+                      snippet: parsed.text || '',
+                      attachments: attachmentsArr
                     });
                   })
                   .catch(e => console.error('Mail parse hiba (recent):', e));
@@ -586,16 +707,40 @@ class SmtpEmailHandler {
               msg.once('end', async () => {
                 try {
                   const parsed = await simpleParser(raw);
-                  resolve({
-                    id: uid,
-                    from: parsed.from?.text || '',
-                    subject: parsed.subject || '',
-                    date: parsed.date ? parsed.date.toISOString() : '',
-                    body: parsed.text || '',
-                    html: parsed.html || null,
-                    text: parsed.text || '',
-                    raw
-                  });
+                    // Save any attachments to disk and include metadata
+                    const attachmentsArr = [];
+                    try {
+                      if (Array.isArray(parsed.attachments) && parsed.attachments.length > 0) {
+                        const attsDir = path.resolve(process.cwd(), 'fromAttachments');
+                        if (!fs.existsSync(attsDir)) fs.mkdirSync(attsDir, { recursive: true });
+                        for (const a of parsed.attachments) {
+                          try {
+                            const name = a.filename || `att-${uid || id}-${Date.now()}`;
+                            const safeName = `${uid || id}-${Date.now()}-${name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+                            const filePath = path.join(attsDir, safeName);
+                            fs.writeFileSync(filePath, a.content);
+                            const b64 = Buffer.from(a.content).toString('base64');
+                            attachmentsArr.push({ filename: name, mimeType: a.contentType || 'application/octet-stream', path: filePath, base64: b64 });
+                          } catch (ea) {
+                            console.error('Attachment save error (getEmailById):', ea && ea.message ? ea.message : ea);
+                          }
+                        }
+                      }
+                    } catch (eatt) {
+                      console.error('Error processing parsed.attachments (getEmailById):', eatt && eatt.message ? eatt.message : eatt);
+                    }
+
+                    resolve({
+                      id: uid,
+                      from: parsed.from?.text || '',
+                      subject: parsed.subject || '',
+                      date: parsed.date ? parsed.date.toISOString() : '',
+                      body: parsed.text || '',
+                      html: parsed.html || null,
+                      text: parsed.text || '',
+                      raw,
+                      attachments: attachmentsArr
+                    });
                 } catch (e) {
                   reject(e);
                 }
