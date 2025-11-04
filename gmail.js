@@ -13,6 +13,7 @@ import { simpleParser } from 'mailparser';
 import fs from 'fs';
 import path from 'path';
 import { createAndStoreEmbeddingsForLongText } from './src/backend/embeddings-helper.js';
+import kbManager from './src/backend/kb-manager.js';
 
 function decodeRFC2047(subject) {
   return subject.replace(/=\?([^?]+)\?([BbQq])\?([^?]+)\?=/g, (match, charset, encoding, text) => {
@@ -249,14 +250,63 @@ export async function getRecentEmails() {
               const wb = XLSX.readFile(filePath, { cellDates: true });
               const sheets = wb.SheetNames || [];
               const parts = [];
+              const cellKBs = [];
               for (const s of sheets) {
                 try {
                   const sheet = wb.Sheets[s];
                   const csv = XLSX.utils.sheet_to_csv(sheet, { FS: '\t' });
                   parts.push(`Sheet: ${s}\n` + csv);
+
+                  // iterate rows/cells to create per-cell KB entries
+                  const rows = XLSX.utils.sheet_to_json(sheet || {}, { header: 1, raw: false, defval: '' });
+                  for (let r = 0; r < rows.length; r++) {
+                    const row = rows[r] || [];
+                    for (let c = 0; c < row.length; c++) {
+                      try {
+                        const val = row[c];
+                        if (val === null || val === undefined) continue;
+                        const sval = String(val).trim();
+                        if (!sval) continue;
+                        let addr = null;
+                        try { addr = XLSX.utils.encode_cell({ r, c }); } catch (ea) { addr = `${r + 1}:${c + 1}`; }
+                        // compute column letter
+                        let col = c + 1;
+                        let colLetter = '';
+                        while (col > 0) {
+                          const rem = (col - 1) % 26;
+                          colLetter = String.fromCharCode(65 + rem) + colLetter;
+                          col = Math.floor((col - 1) / 26);
+                        }
+                        const cellId = `${sourceId || messageId || Date.now()}-att-${path.basename(filePath)}-sheet-${s}-cell-${addr}`;
+                        const cellAddress = `${s}!${colLetter}${r + 1}`;
+                        const kbEmail = {
+                          id: cellId,
+                          from: headers['From'] || '',
+                          subject: (headers['Subject'] ? decodeRFC2047(headers['Subject']) : '') || `Attachment: ${path.basename(filePath)} [${s} ${addr}]`,
+                          date: headers['Date'] || new Date().toISOString(),
+                          body: sval,
+                          sheet: s,
+                          colLetter,
+                          row: r + 1,
+                          cellAddress
+                        };
+                        cellKBs.push(kbEmail);
+                      } catch (cellErr) {
+                        // ignore single cell errors
+                      }
+                    }
+                  }
                 } catch (se) { /* ignore sheet errors */ }
               }
               text = parts.join('\n\n');
+
+              try {
+                if (cellKBs.length) {
+                  await kbManager.addEmails(cellKBs);
+                }
+              } catch (kbErr) {
+                console.error('[AIServiceApp][gmail.js] failed to add per-cell KB entries:', kbErr && kbErr.message ? kbErr.message : kbErr);
+              }
             } catch (e) {
               console.error('[AIServiceApp][gmail.js] excel parse error:', e && e.message ? e.message : e);
             }

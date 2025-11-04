@@ -1,2 +1,9 @@
 [
+  {
+    "id": "19a4f3c325238545",
+    "from": "mimail <rendszerai@gmail.com>",
+    "subject": "Adatgyűjtés",
+    "date": "Tue, 4 Nov 2025 15:18:56 +0100",
+    "snippet": "Gyüjtsd ki a levelezésemből az összes email címet ami Pécs városhoz tartozik a táblázatban, az összes kell még duplikáció esetén is."
+  }
 ]

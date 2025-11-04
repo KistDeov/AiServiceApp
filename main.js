@@ -1006,20 +1006,68 @@ ipcMain.handle('import-folder-embeddings', async (event, { dirPath, model = 'tex
           text = fs.readFileSync(file, 'utf8');
         } else if ((ext === '.xlsx' || ext === '.xls') && XLSX) {
           try {
-            // ensure readFile exists (some bundlers expose under default)
+            // Parse workbook into structured cell entries instead of flattening to CSV.
+            // This preserves sheet name, row and column so we can locate cells like "Ügyfelek!G763" later.
             const reader = typeof XLSX.readFile === 'function' ? XLSX : (XLSX.default || XLSX);
             if (typeof reader.readFile !== 'function') {
               throw new Error('XLSX.readFile is not available');
             }
             const wb = reader.readFile(file);
-            for (const sname of wb.SheetNames) {
-              const csv = (XLSX.utils && XLSX.utils.sheet_to_csv)
-                ? XLSX.utils.sheet_to_csv(wb.Sheets[sname])
-                : (reader.utils && reader.utils.sheet_to_csv)
-                  ? reader.utils.sheet_to_csv(wb.Sheets[sname])
-                  : '';
-              text += '\n' + csv;
+            // We'll build an array of small entries (per cell). For long cell values we use the
+            // embeddings-helper.chunkText dynamically to split while keeping per-cell indices.
+            const entries = [];
+            // dynamic import of local chunker to handle very long cell contents without loss
+            let chunkTextFn = null;
+            try {
+              const { pathToFileURL } = await import('url');
+              const helperPath = path.join(process.cwd(), 'src', 'backend', 'embeddings-helper.js');
+              const helperUrl = pathToFileURL(helperPath).href;
+              const helper = await import(helperUrl);
+              chunkTextFn = helper.chunkText || helper.default?.chunkText || helper.chunkText;
+            } catch (ie) {
+              // If we can't import the helper, fallback to simple per-cell strings
+              chunkTextFn = null;
             }
+
+            for (const sname of wb.SheetNames) {
+              const ws = wb.Sheets[sname];
+              // Convert to array-of-arrays so we can iterate rows/cols reliably
+              const data = (XLSX.utils && XLSX.utils.sheet_to_json)
+                ? XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+                : ((reader.utils && reader.utils.sheet_to_json)
+                  ? reader.utils.sheet_to_json(ws, { header: 1, defval: '' })
+                  : []);
+              for (let r = 0; r < data.length; r++) {
+                const row = data[r] || [];
+                for (let c = 0; c < row.length; c++) {
+                  const cellVal = row[c];
+                  const cellText = (typeof cellVal === 'string' || typeof cellVal === 'number') ? String(cellVal) : (cellVal ? JSON.stringify(cellVal) : '');
+                  // compute column letter (A, B, C...)
+                  let col = c + 1;
+                  let colLetter = '';
+                  while (col > 0) {
+                    const rem = (col - 1) % 26;
+                    colLetter = String.fromCharCode(65 + rem) + colLetter;
+                    col = Math.floor((col - 1) / 26);
+                  }
+                  // If the cell is large and chunkTextFn is available, split preserving indices
+                  if (chunkTextFn && cellText.length > 8000) {
+                    const parts = chunkTextFn(cellText, 16000, Math.floor(16000 * 0.08)) || [];
+                    for (let pi = 0; pi < parts.length; pi++) {
+                      const p = parts[pi];
+                      entries.push({ file, sheet: sname, row: r + 1, col: c + 1, colLetter, cellAddress: `${sname}!${colLetter}${r + 1}`, text: p.text || p, cellChunkIndex: pi, cellChunkStart: p.start || null, cellChunkEnd: p.end || null });
+                    }
+                  } else {
+                    entries.push({ file, sheet: sname, row: r + 1, col: c + 1, colLetter, cellAddress: `${sname}!${colLetter}${r + 1}`, text: cellText, cellChunkIndex: 0, cellChunkStart: 0, cellChunkEnd: cellText.length });
+                  }
+                }
+              }
+            }
+
+            // Instead of concatenating into a single huge text blob, we attach a structured
+            // representation to `text` as JSON so later code knows this came from Excel.
+            // The downstream embedding loop will detect `xlsxEntries` and handle them.
+            text = JSON.stringify({ xlsxEntries: entries });
           } catch (e) {
             console.error('[import-folder-embeddings] xlsx read error for', file, e);
             BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, status: 'error', error: e?.message || String(e) }));
@@ -1038,24 +1086,123 @@ ipcMain.handle('import-folder-embeddings', async (event, { dirPath, model = 'tex
         continue;
       }
 
-      // chunk text to avoid very large embedding inputs
-      const chunks = [];
-      for (let i = 0; i < text.length; i += maxChunkChars) {
-        chunks.push(text.slice(i, i + maxChunkChars));
+      // If the text is a structured Excel parse (our earlier JSON marker), process per-cell entries
+      let excelEntries = null;
+      try {
+        const maybe = JSON.parse(text);
+        if (maybe && Array.isArray(maybe.xlsxEntries)) excelEntries = maybe.xlsxEntries;
+      } catch (e) {
+        excelEntries = null;
       }
 
-      for (let ci = 0; ci < chunks.length; ci++) {
-        const chunk = chunks[ci];
+      if (Array.isArray(excelEntries) && excelEntries.length) {
+        // Batch embed per-cell entries for speed while preserving sheet/row/col metadata.
+        // Use a bounded concurrency worker pool to parallelize API calls safely.
+        const BATCH = 200; // batch size for embeddings
+        const CONCURRENCY = 2; // number of concurrent embedding requests
+        const batches = [];
+        for (let bi = 0; bi < excelEntries.length; bi += BATCH) batches.push(excelEntries.slice(bi, bi + BATCH));
+        const _newExcelIds = [];
+
+        let nextBatchIdx = 0;
+        const worker = async () => {
+          while (true) {
+            const i = nextBatchIdx++;
+            if (i >= batches.length) break;
+            const slice = batches[i];
+            const inputs = slice.map(s => String(s.text || ''));
+            try {
+              BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, chunkIndex: i + 1, totalChunks: batches.length, status: 'embedding' }));
+              const resp = await openai.embeddings.create({ model, input: inputs });
+              const data = (resp && resp.data) ? resp.data : [];
+              for (let j = 0; j < data.length; j++) {
+                const emb = data[j] && data[j].embedding ? data[j].embedding : null;
+                const entry = slice[j];
+                const id = `${fi}-${entry.sheet || 'sheet'}-${entry.row || 0}-${entry.col || 0}-${entry.cellChunkIndex || 0}`;
+                const locationLabel = `${entry.sheet || ''}!${entry.colLetter || ''}${entry.row || ''}`;
+                embeddingsOut.push({ id, file: entry.file, filePath: entry.file, source: locationLabel, title: `${path.basename(entry.file || '')} :: ${locationLabel}`, sheet: entry.sheet, row: entry.row, col: entry.col, colLetter: entry.colLetter, cellAddress: entry.cellAddress, cellChunkIndex: entry.cellChunkIndex, chunkStart: entry.cellChunkStart, chunkEnd: entry.cellChunkEnd, textSnippet: String(entry.text || '').slice(0, 2000), embedding: emb });
+                _newExcelIds.push(id);
+              }
+            } catch (embErr) {
+              console.error('[import-folder-embeddings] excel batch embedding error for', file, embErr);
+              BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, status: 'error', error: embErr?.message || String(embErr) }));
+              // continue to next batch
+            }
+          }
+        };
+
+        const workers = [];
+        for (let w = 0; w < Math.min(CONCURRENCY, batches.length); w++) workers.push(worker());
+        await Promise.all(workers);
+        // Mirror newly embedded Excel entries into the KB file so KB-based queries
+        // (KB.queryByEmbedding / getAllEntries) will include sheet/cell metadata.
         try {
-          BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, chunkIndex: ci + 1, totalChunks: chunks.length, status: 'embedding' }));
-          const resp = await openai.embeddings.create({ model, input: chunk });
-          const emb = resp?.data && resp.data[0] && resp.data[0].embedding ? resp.data[0].embedding : null;
-          // Keep the full chunk as textSnippet (no arbitrary small truncation).
-          // The chunk length is bounded by maxChunkChars above.
-          embeddingsOut.push({ id: `${fi}-${ci}`, file, chunkIndex: ci, textSnippet: chunk, embedding: emb });
-        } catch (embErr) {
-          console.error('[import-folder-embeddings] embedding error for', file, embErr);
-          BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, chunkIndex: ci + 1, totalChunks: chunks.length, status: 'error', error: embErr?.message || String(embErr) }));
+          const kbFile = path.join(app.getPath('userData'), 'embeddings_kb.json');
+          let kbExisting = [];
+          try {
+            if (fs.existsSync(kbFile)) kbExisting = JSON.parse(fs.readFileSync(kbFile, 'utf8') || '[]');
+          } catch (re) {
+            kbExisting = [];
+          }
+          const existingIds = new Set(kbExisting.map(x => x.id));
+          const toAdd = [];
+          for (const id of _newExcelIds) {
+            const e = embeddingsOut.find(x => x.id === id);
+            if (!e) continue;
+            if (existingIds.has(id)) continue;
+            const docId = `file-${path.basename(e.file || file)}::${e.sheet || ''}`;
+            const kbEntry = {
+              id: e.id,
+              docId,
+              chunkIndex: e.cellChunkIndex || 0,
+              text: String(e.textSnippet || ''),
+              subject: e.sheet || path.basename(e.file || file),
+              row: e.row || null,
+              col: e.col || null,
+              colLetter: e.colLetter || null,
+              cellAddress: e.cellAddress || null,
+              from: 'excel',
+              date: null,
+              embedding: e.embedding || null,
+              chunkStart: e.chunkStart || null,
+              chunkEnd: e.chunkEnd || null,
+              totalChunks: null,
+              filePath: e.filePath || file
+            };
+            kbExisting.push(kbEntry);
+            toAdd.push(kbEntry.id);
+          }
+          if (toAdd.length) {
+            try {
+              fs.writeFileSync(kbFile, JSON.stringify(kbExisting, null, 2), 'utf8');
+              BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, status: 'kb-mirror', added: toAdd.length }));
+            } catch (we) {
+              console.error('[import-folder-embeddings] failed to write KB file:', we && we.message ? we.message : we);
+            }
+          }
+        } catch (kbMirrorErr) {
+          console.error('[import-folder-embeddings] failed to mirror excel entries to KB:', kbMirrorErr);
+        }
+      } else {
+        // fallback existing behavior: chunk text to avoid very large embedding inputs
+        const chunks = [];
+        for (let i = 0; i < text.length; i += maxChunkChars) {
+          chunks.push(text.slice(i, i + maxChunkChars));
+        }
+
+        for (let ci = 0; ci < chunks.length; ci++) {
+          const chunk = chunks[ci];
+          try {
+            BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, chunkIndex: ci + 1, totalChunks: chunks.length, status: 'embedding' }));
+            const resp = await openai.embeddings.create({ model, input: chunk });
+            const emb = resp?.data && resp.data[0] && resp.data[0].embedding ? resp.data[0].embedding : null;
+            // Keep the full chunk as textSnippet (no arbitrary small truncation).
+            // The chunk length is bounded by maxChunkChars above.
+            embeddingsOut.push({ id: `${fi}-${ci}`, file, chunkIndex: ci, textSnippet: chunk, embedding: emb });
+          } catch (embErr) {
+            console.error('[import-folder-embeddings] embedding error for', file, embErr);
+            BrowserWindow.getAllWindows().forEach(w => w.webContents.send('import-progress', { file, index: fi + 1, totalFiles, chunkIndex: ci + 1, totalChunks: chunks.length, status: 'error', error: embErr?.message || String(embErr) }));
+          }
         }
       }
 
@@ -1260,6 +1407,89 @@ ipcMain.handle('saveWebSettings', async (event, { webUrls }) => {
   settings.webUrls = Array.isArray(webUrls) ? webUrls : [];
   saveSettings(settings);
   return true;
+});
+
+// Fast exact lookup for an Excel cell by address (e.g. "Ügyfelek!G763" or sheet/col/row)
+// Reusable helper: find an Excel cell across KB and embeddings files
+async function findExcelCell({ cellAddress, sheet, colLetter, row } = {}) {
+  try {
+    const normalize = (s) => {
+      if (!s) return '';
+      try {
+        return String(s).normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
+      } catch (e) {
+        return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+      }
+    };
+
+    let targetSheet = sheet || null;
+    let targetCol = colLetter || null;
+    let targetRow = typeof row === 'number' ? Number(row) : (row ? Number(row) : null);
+    if (cellAddress && (!targetSheet || !targetCol || !targetRow)) {
+      const m = String(cellAddress).trim().match(/^([^!\t\n\r]+)[!\s]+([A-Za-z]+)\s*-?\s*(\d+)$/);
+      if (m) {
+        targetSheet = m[1].trim();
+        targetCol = m[2].trim();
+        targetRow = Number(m[3]);
+      }
+    }
+
+    const normalizedSheet = normalize(targetSheet || '');
+    const normalizedCol = targetCol ? String(targetCol).toUpperCase().replace(/\s+/g, '') : null;
+
+    const kbFile = path.join(app.getPath('userData'), 'embeddings_kb.json');
+    let kbExisting = [];
+    try {
+      if (fs.existsSync(kbFile)) kbExisting = JSON.parse(fs.readFileSync(kbFile, 'utf8') || '[]');
+    } catch (e) {
+      kbExisting = [];
+    }
+
+    const matches = kbExisting.filter(ent => {
+      try {
+        if (!ent) return false;
+        if (normalizedSheet && normalize(ent.subject || '') !== normalizedSheet) return false;
+        if (normalizedCol && String(ent.colLetter || '').toUpperCase() !== normalizedCol) return false;
+        if (targetRow && Number(ent.row) !== Number(targetRow)) return false;
+        return true;
+      } catch (e) { return false; }
+    });
+
+    if (matches.length) {
+      matches.sort((a, b) => (Number(a.chunkIndex) || 0) - (Number(b.chunkIndex) || 0));
+      const full = matches.map(m => String(m.text || m.textSnippet || '')).join('');
+      return { success: true, source: 'kb', matches, text: full };
+    }
+
+    const embFile = path.join(app.getPath('userData'), 'embeddings.json');
+    try {
+      if (fs.existsSync(embFile)) {
+        const raw = JSON.parse(fs.readFileSync(embFile, 'utf8') || '[]');
+        const key = (cellAddress || `${targetSheet || ''}!${targetCol || ''}${targetRow || ''}`).trim();
+        const fallback = raw.filter(r => {
+          try {
+            const src = String(r.source || r.title || '').toLowerCase();
+            return key && src && src.toLowerCase().includes(key.toLowerCase());
+          } catch (e) { return false; }
+        });
+        if (fallback.length) {
+          fallback.sort((a, b) => (a.chunkIndex || 0) - (b.chunkIndex || 0));
+          const full = fallback.map(f => String(f.textSnippet || f.text || f.content || '')).join('');
+          return { success: true, source: 'embeddings', matches: fallback, text: full };
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    return { success: false, error: 'No matching cell found' };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+ipcMain.handle('lookup-excel-cell', async (event, params = {}) => {
+  return await findExcelCell(params);
 });
 
 // Fetch data from the web URL
@@ -1497,6 +1727,51 @@ async function generateReply(email) {
     // and (B) the most similar snippets from the user's recent emails (last 50 loaded from mailbox).
     // This block computes the embedding for the incoming email once and reuses it.
     let embeddingsContext = '';
+    // Quick-path: detect explicit Excel cell queries in the incoming email (e.g. "Ügyfelek!G763" or "G 763 Ügyfelek").
+    try {
+      const searchText = `${email.subject || ''}\n${email.body || ''}`;
+      let detected = null;
+      // direct pattern sheet!ColRow
+      const direct = String(searchText).match(/([^!\n\r]+)[!\s]+([A-Za-z]+)\s*-?\s*(\d{1,6})/);
+      if (direct) {
+        detected = { sheet: direct[1].trim(), colLetter: direct[2].trim().toUpperCase(), row: Number(direct[3]) };
+      } else {
+        // try to find patterns that reference known sheet names from excelData
+        try {
+          const sheetNames = Object.keys(excelData || {});
+          for (const sname of sheetNames) {
+            if (!sname) continue;
+            const esc = sname.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+            // pattern: <sheet> <col><row> or <sheet> <col> <row>
+            const p1 = new RegExp(esc + "[!\s]+([A-Za-z]+)\s*-?\s*(\\d{1,6})", 'i');
+            const m1 = String(searchText).match(p1);
+            if (m1) { detected = { sheet: sname, colLetter: m1[1].trim().toUpperCase(), row: Number(m1[2]) }; break; }
+            // pattern: <col><row> <sheet>
+            const p2 = new RegExp('([A-Za-z]+)\s*-?\s*(\\d{1,6})\\s+' + esc, 'i');
+            const m2 = String(searchText).match(p2);
+            if (m2) { detected = { sheet: sname, colLetter: m2[1].trim().toUpperCase(), row: Number(m2[2]) }; break; }
+          }
+        } catch (e) {
+          detected = null;
+        }
+      }
+
+      if (detected) {
+        try {
+          const lookupRes = await findExcelCell({ sheet: detected.sheet, colLetter: detected.colLetter, row: detected.row });
+          if (lookupRes && lookupRes.success && lookupRes.text) {
+            // inject the exact cell lookup into embeddingsContext with high priority
+            const short = String(lookupRes.text).slice(0, 2000);
+            const cellAddr = `${detected.sheet || ''}!${detected.colLetter || ''}${detected.row || ''}`;
+            embeddingsContext += `EXACT_CELL_LOOKUP: ${cellAddr} => ${short}\n\n`;
+          }
+        } catch (e) {
+          // ignore lookup failures here
+        }
+      }
+    } catch (e) {
+      // non-fatal
+    }
     try {
       const modelForEmb = 'text-embedding-3-small';
 

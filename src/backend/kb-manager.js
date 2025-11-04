@@ -103,10 +103,15 @@ async function addEmails(emails = []) {
     } else {
       msgId = String(msgId);
     }
-    const subject = em.subject || '';
-    const from = em.from || '';
-    const date = em.date || '';
-    const body = em.body || em.text || '';
+  const subject = em.subject || '';
+  const from = em.from || '';
+  const date = em.date || '';
+  const body = em.body || em.text || '';
+  // Optional cell-level metadata (sheet name, column letter, row number, full cellAddress)
+  const sheet = em.sheet || null;
+  const colLetter = em.colLetter || em.column || null;
+  const row = (typeof em.row === 'number' || (em.row && !isNaN(Number(em.row)))) ? Number(em.row) : null;
+  const cellAddress = em.cellAddress || null;
     const chunkObjs = losslessChunkText(body, DEFAULT_CHUNK_CHARS, Math.floor(DEFAULT_CHUNK_CHARS * 0.1));
     const totalChunks = chunkObjs.length;
     for (let ci = 0; ci < chunkObjs.length; ci++) {
@@ -116,7 +121,7 @@ async function addEmails(emails = []) {
       const chunkEnd = (cobj && typeof cobj.end === 'number') ? cobj.end : null;
       const id = `${msgId}-${ci}`;
       if (existingIds.has(id)) continue;
-      toEmbed.push({ id, docId: msgId, chunkIndex: ci, text: chunkText, subject, from, date, chunkStart, chunkEnd, totalChunks });
+      toEmbed.push({ id, docId: msgId, chunkIndex: ci, text: chunkText, subject, from, date, chunkStart, chunkEnd, totalChunks, sheet, colLetter, row, cellAddress });
     }
   }
 
@@ -160,7 +165,7 @@ async function addEmails(emails = []) {
         const data = (resp && resp.data) ? resp.data.map(d => d.embedding) : [];
         for (let j = 0; j < data.length; j++) {
           const entry = slice[j];
-          kb.push({ id: entry.id, docId: entry.docId, chunkIndex: entry.chunkIndex, text: entry.text, subject: entry.subject, from: entry.from, date: entry.date, embedding: data[j], chunkStart: entry.chunkStart || null, chunkEnd: entry.chunkEnd || null, totalChunks: entry.totalChunks || null });
+          kb.push({ id: entry.id, docId: entry.docId, chunkIndex: entry.chunkIndex, text: entry.text, subject: entry.subject, from: entry.from, date: entry.date, embedding: data[j], chunkStart: entry.chunkStart || null, chunkEnd: entry.chunkEnd || null, totalChunks: entry.totalChunks || null, sheet: entry.sheet || null, colLetter: entry.colLetter || null, row: (typeof entry.row === 'number' ? entry.row : (entry.row ? Number(entry.row) : null)) || null, cellAddress: entry.cellAddress || null });
         }
         appendLog(`Embedded batch ${i}/${toEmbed.length} -> ${data.length} items`);
         await sleep(200);

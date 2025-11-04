@@ -470,14 +470,71 @@ class SmtpEmailHandler {
                                       const wb = XLSX.read(a.content, { type: 'buffer' });
                                       const sheets = wb.SheetNames || [];
                                       const parts = [];
+                                      // Collect per-cell KB entries so we can embed/retrieve exact cell values
+                                      const cellKBs = [];
                                       for (const sname of sheets) {
                                         try {
                                           const sh = wb.Sheets[sname];
+                                          // produce a human-readable CSV fallback for general extracted text
                                           const csv = XLSX.utils.sheet_to_csv(sh || {});
                                           if (csv) parts.push(csv);
+
+                                          // get a 2D array of rows to iterate cells and retain coordinates
+                                          const rows = XLSX.utils.sheet_to_json(sh || {}, { header: 1, raw: false, defval: '' });
+                                          for (let r = 0; r < rows.length; r++) {
+                                            const row = rows[r] || [];
+                                            for (let c = 0; c < row.length; c++) {
+                                              try {
+                                                const val = row[c];
+                                                if (val === null || val === undefined) continue;
+                                                const sval = String(val).trim();
+                                                if (!sval) continue;
+                                                // compute A1-style address
+                                                let addr = null;
+                                                try { addr = XLSX.utils.encode_cell({ r, c }); } catch (ea) { addr = `${r + 1}:${c + 1}`; }
+                                                const cellId = `${uid || parsed.messageId || Date.now()}-att-${safeName}-sheet-${sname}-cell-${addr}`;
+                                                // compute column letter (A, B, C...)
+                                                let col = c + 1;
+                                                let colLetter = '';
+                                                while (col > 0) {
+                                                  const rem = (col - 1) % 26;
+                                                  colLetter = String.fromCharCode(65 + rem) + colLetter;
+                                                  col = Math.floor((col - 1) / 26);
+                                                }
+                                                const cellAddress = `${sname}!${colLetter}${r + 1}`;
+                                                const kbEmail = {
+                                                  id: cellId,
+                                                  from: parsed.from?.text || '',
+                                                  subject: parsed.subject || `Attachment: ${name} [${sname} ${addr}]`,
+                                                  date: parsed.date ? parsed.date.toISOString() : new Date().toISOString(),
+                                                  body: sval,
+                                                  sheet: sname,
+                                                  colLetter,
+                                                  row: r + 1,
+                                                  cellAddress
+                                                };
+                                                cellKBs.push(kbEmail);
+                                              } catch (cellErr) {
+                                                // ignore single cell errors
+                                              }
+                                            }
+                                          }
                                         } catch (se) { /* ignore sheet errors */ }
                                       }
                                       extracted = parts.join('\n\n');
+
+                                      // If we collected cell-level entries, add them to the KB so
+                                      // embeddings are created per cell and exact cell retrieval
+                                      // becomes possible. This is async but we await here so the
+                                      // mailbox processing includes it.
+                                      try {
+                                        if (cellKBs.length) {
+                                          // batch-add cells to KB (kb-manager will handle embedding)
+                                          await kbManager.addEmails(cellKBs);
+                                        }
+                                      } catch (kbCellErr) {
+                                        console.error('[smtp-handler] failed to add per-cell KB entries:', kbCellErr && kbCellErr.message ? kbCellErr.message : kbCellErr);
+                                      }
                                     } catch (xe) {
                                       console.error('[smtp-handler] xlsx parse error:', xe && xe.message ? xe.message : xe);
                                     }
